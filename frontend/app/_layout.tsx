@@ -1,16 +1,27 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '../src/store/authStore';
 import { Colors } from '../src/constants/colors';
+import SplashScreen from '../src/components/SplashScreen';
 
 export default function RootLayout() {
   const { initialize, isInitialized, isLoading } = useAuthStore();
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     initialize();
   }, []);
+
+  if (showSplash) {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <SplashScreen onFinish={() => setShowSplash(false)} />
+      </>
+    );
+  }
 
   if (!isInitialized || isLoading) {
     return (
