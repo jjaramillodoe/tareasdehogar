@@ -83,8 +83,8 @@ export default function ChildrenScreen() {
     }
 
     const age = parseInt(formData.age);
-    if (isNaN(age) || age < 1 || age >= 18) {
-      Alert.alert('Error', 'La edad debe ser un número entre 1 y 17');
+    if (isNaN(age) || age < 1 || age >= 19) {
+      Alert.alert('Error', 'La edad debe ser un número entre 1 y 18');
       return;
     }
 
@@ -280,7 +280,7 @@ export default function ChildrenScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Edad (1-17) *</Text>
+              <Text style={styles.inputLabel}>Edad (1-18) *</Text>
               <TextInput
                 style={styles.textInput}
                 placeholder="Edad"

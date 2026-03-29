@@ -56,6 +56,28 @@ const frequencyLabels: Record<string, string> = {
   semanal: 'Semanal',
 };
 
+// Predefined chores list
+const predefinedChores = [
+  { title: 'Limpiar la sala', description: 'Barrer, trapear y ordenar la sala', amount: 30, icon: 'tv-outline' },
+  { title: 'Limpiar el cuarto', description: 'Ordenar y limpiar el cuarto', amount: 25, icon: 'bed-outline' },
+  { title: 'Limpiar la cocina', description: 'Lavar platos, limpiar estufa y barrer', amount: 35, icon: 'restaurant-outline' },
+  { title: 'Lavar los trastes', description: 'Lavar y secar todos los trastes', amount: 20, icon: 'water-outline' },
+  { title: 'Barrer el patio', description: 'Barrer y limpiar el patio', amount: 25, icon: 'leaf-outline' },
+  { title: 'Sacar la basura', description: 'Recoger y sacar la basura', amount: 10, icon: 'trash-outline' },
+  { title: 'Tender la cama', description: 'Tender y ordenar la cama', amount: 10, icon: 'bed-outline' },
+  { title: 'Lavar la ropa', description: 'Lavar, tender y doblar la ropa', amount: 40, icon: 'shirt-outline' },
+  { title: 'Planchar la ropa', description: 'Planchar y guardar la ropa', amount: 30, icon: 'shirt-outline' },
+  { title: 'Limpiar el baño', description: 'Limpiar inodoro, lavabo y piso', amount: 35, icon: 'water-outline' },
+  { title: 'Pasear al perro', description: 'Pasear al perro por 30 minutos', amount: 15, icon: 'paw-outline' },
+  { title: 'Alimentar a las mascotas', description: 'Dar comida y agua a las mascotas', amount: 10, icon: 'paw-outline' },
+  { title: 'Regar las plantas', description: 'Regar todas las plantas', amount: 10, icon: 'flower-outline' },
+  { title: 'Hacer la tarea', description: 'Completar todas las tareas escolares', amount: 20, icon: 'book-outline' },
+  { title: 'Lavar el carro', description: 'Lavar y secar el carro', amount: 50, icon: 'car-outline' },
+  { title: 'Aspirar la casa', description: 'Aspirar todas las habitaciones', amount: 30, icon: 'home-outline' },
+  { title: 'Ordenar el closet', description: 'Organizar y ordenar el closet', amount: 25, icon: 'file-tray-stacked-outline' },
+  { title: 'Ayudar con la cena', description: 'Ayudar a preparar la cena', amount: 20, icon: 'restaurant-outline' },
+];
+
 export default function ChoresScreen() {
   const router = useRouter();
   const { family } = useAuthStore();
@@ -64,6 +86,7 @@ export default function ChoresScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showPredefinedModal, setShowPredefinedModal] = useState(false);
   const [editingChore, setEditingChore] = useState<Chore | null>(null);
   const [selectedChildren, setSelectedChildren] = useState<string[]>([]);
   const [formData, setFormData] = useState({
@@ -113,6 +136,24 @@ export default function ChoresScreen() {
       setSelectedChildren([]);
     }
     setShowModal(true);
+  };
+
+  const selectPredefinedChore = (predefined: typeof predefinedChores[0]) => {
+    setFormData({
+      title: predefined.title,
+      description: predefined.description,
+      amount: predefined.amount.toString(),
+      frequency: 'unica',
+    });
+    setShowPredefinedModal(false);
+    setShowModal(true);
+  };
+
+  const openNewChoreOptions = () => {
+    setEditingChore(null);
+    setFormData({ title: '', description: '', amount: '', frequency: 'unica' });
+    setSelectedChildren([]);
+    setShowPredefinedModal(true);
   };
 
   const toggleChildSelection = (childId: string) => {
@@ -272,7 +313,7 @@ export default function ChoresScreen() {
         <Text style={styles.headerTitle}>Tareas</Text>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => openModal()}
+          onPress={openNewChoreOptions}
         >
           <Ionicons name="add" size={24} color={Colors.white} />
         </TouchableOpacity>
@@ -575,6 +616,77 @@ export default function ChoresScreen() {
               </View>
             </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Predefined Chores Modal */}
+      <Modal
+        visible={showPredefinedModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPredefinedModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.predefinedModalContent}>
+            <View style={styles.predefinedModalHeader}>
+              <Text style={styles.modalTitle}>Nueva Tarea</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowPredefinedModal(false)}
+              >
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.predefinedSubtitle}>
+              Selecciona una tarea predefinida o crea una personalizada
+            </Text>
+
+            {/* Custom Task Button */}
+            <TouchableOpacity
+              style={styles.customTaskButton}
+              onPress={() => {
+                setShowPredefinedModal(false);
+                setShowModal(true);
+              }}
+            >
+              <View style={styles.customTaskIcon}>
+                <Ionicons name="create-outline" size={24} color={Colors.white} />
+              </View>
+              <View style={styles.customTaskInfo}>
+                <Text style={styles.customTaskTitle}>Tarea Personalizada</Text>
+                <Text style={styles.customTaskDesc}>Crea una tarea con tu descripción</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+            </TouchableOpacity>
+
+            <Text style={styles.predefinedSectionTitle}>Tareas Predefinidas</Text>
+
+            <ScrollView style={styles.predefinedList} showsVerticalScrollIndicator={false}>
+              {predefinedChores.map((chore, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.predefinedItem}
+                  onPress={() => selectPredefinedChore(chore)}
+                >
+                  <View style={[styles.predefinedIcon, { backgroundColor: index % 3 === 0 ? Colors.primary + '20' : index % 3 === 1 ? Colors.secondary + '20' : Colors.accent + '20' }]}>
+                    <Ionicons 
+                      name={chore.icon as any} 
+                      size={22} 
+                      color={index % 3 === 0 ? Colors.primary : index % 3 === 1 ? Colors.secondary : Colors.accent} 
+                    />
+                  </View>
+                  <View style={styles.predefinedInfo}>
+                    <Text style={styles.predefinedTitle}>{chore.title}</Text>
+                    <Text style={styles.predefinedDesc} numberOfLines={1}>{chore.description}</Text>
+                  </View>
+                  <Text style={styles.predefinedAmount}>
+                    {family?.currency} {chore.amount}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         </View>
       </Modal>
     </View>
@@ -953,5 +1065,105 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  // Predefined Modal Styles
+  predefinedModalContent: {
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  predefinedModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  predefinedSubtitle: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginBottom: 20,
+  },
+  customTaskButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  customTaskIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customTaskInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  customTaskTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  customTaskDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  predefinedSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  predefinedList: {
+    maxHeight: 400,
+  },
+  predefinedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  predefinedIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  predefinedInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  predefinedTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  predefinedDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  predefinedAmount: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.secondary,
   },
 });

@@ -323,8 +323,8 @@ async def create_child(child_data: ChildCreate, current_user: dict = Depends(get
     if not current_user.get("family_id"):
         raise HTTPException(status_code=400, detail="Debes crear una familia primero")
     
-    if child_data.age >= 18:
-        raise HTTPException(status_code=400, detail="Los hijos deben ser menores de 18 años")
+    if child_data.age >= 19:
+        raise HTTPException(status_code=400, detail="Los hijos deben ser menores de 19 años")
     
     child_id = str(uuid.uuid4())
     child = {
@@ -397,8 +397,8 @@ async def update_child(child_id: str, child_data: ChildUpdate, current_user: dic
     if child_data.name is not None:
         update_data["name"] = child_data.name
     if child_data.age is not None:
-        if child_data.age >= 18:
-            raise HTTPException(status_code=400, detail="La edad debe ser menor a 18 años")
+        if child_data.age >= 19:
+            raise HTTPException(status_code=400, detail="La edad debe ser menor a 19 años")
         update_data["age"] = child_data.age
     if child_data.alias is not None:
         update_data["alias"] = child_data.alias
