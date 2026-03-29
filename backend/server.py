@@ -152,6 +152,58 @@ class PaymentResponse(BaseModel):
     status: str  # aprobado, pagado
     created_at: datetime
 
+# Goal Models (Metas)
+class GoalCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    target_tasks: int  # Number of tasks to complete
+    bonus_amount: float  # Bonus reward
+    child_id: str  # Assigned to specific child
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class GoalResponse(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    target_tasks: int
+    bonus_amount: float
+    child_id: str
+    completed_tasks: int
+    is_completed: bool
+    bonus_paid: bool
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    family_id: str
+    created_at: datetime
+
+class GoalUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    target_tasks: Optional[int] = None
+    bonus_amount: Optional[float] = None
+
+# Notification Models
+class NotificationResponse(BaseModel):
+    id: str
+    type: str  # task_completed, task_approved, goal_achieved, streak, reminder
+    title: str
+    message: str
+    child_id: Optional[str] = None
+    is_read: bool
+    family_id: str
+    created_at: datetime
+
+# Achievement Models (Logros)
+class AchievementResponse(BaseModel):
+    id: str
+    type: str  # streak_3, streak_7, streak_30, first_task, tasks_10, tasks_50, etc.
+    title: str
+    description: str
+    icon: str
+    child_id: str
+    earned_at: datetime
+
 # ==================== UTILITY FUNCTIONS ====================
 
 def hash_password(password: str) -> str:
@@ -632,8 +684,62 @@ async def approve_chore(chore_id: str, current_user: dict = Depends(get_current_
     }
     await db.payments.insert_one(payment)
     
+    # Update streak and check achievements
+    await update_child_streak(child_id, current_user["family_id"])
+    
+    # Update goal progress
+    await update_goal_progress(child_id, current_user["family_id"])
+    
+    # Create notification
+    child = await db.children.find_one({"id": child_id})
+    await create_notification(
+        current_user["family_id"],
+        "task_approved",
+        "¡Tarea aprobada!",
+        f"La tarea '{chore['title']}' fue aprobada. {child['name']} ganó {chore['amount']}",
+        child_id
+    )
+    
     updated = await db.chores.find_one({"id": chore_id})
     return ChoreResponse(**updated)
+
+async def update_goal_progress(child_id: str, family_id: str):
+    """Update progress on active goals when a task is approved"""
+    # Find active goals for this child
+    active_goals = await db.goals.find({
+        "child_id": child_id,
+        "family_id": family_id,
+        "is_completed": False
+    }).to_list(100)
+    
+    for goal in active_goals:
+        new_count = goal["completed_tasks"] + 1
+        is_completed = new_count >= goal["target_tasks"]
+        
+        await db.goals.update_one(
+            {"id": goal["id"]},
+            {
+                "$set": {
+                    "completed_tasks": new_count,
+                    "is_completed": is_completed
+                }
+            }
+        )
+        
+        if is_completed:
+            child = await db.children.find_one({"id": child_id})
+            await create_notification(
+                family_id,
+                "goal_achieved",
+                "¡Meta cumplida!",
+                f"{child['name']} completó la meta '{goal['title']}'. ¡Bono de {goal['bonus_amount']} disponible!",
+                child_id
+            )
+            
+            # Award goal achievement if first goal
+            existing = await db.achievements.find_one({"child_id": child_id, "type": "goal_completed"})
+            if not existing:
+                await award_achievement(child_id, family_id, "goal_completed")
 
 @api_router.post("/chores/{chore_id}/reject", response_model=ChoreResponse)
 async def reject_chore(chore_id: str, current_user: dict = Depends(get_current_user)):
@@ -727,13 +833,449 @@ async def get_child_stats(child_id: str, current_user: dict = Depends(get_curren
         "status": "aprobada"
     })
     
+    # Get streak
+    streak = child.get("current_streak", 0)
+    best_streak = child.get("best_streak", 0)
+    
     return {
         "child_id": child_id,
         "balance": child.get("balance", 0.0),
         "pending_tasks": pending,
         "completed_tasks": completed,
-        "approved_tasks": approved
+        "approved_tasks": approved,
+        "current_streak": streak,
+        "best_streak": best_streak
     }
+
+@api_router.get("/stats/family/report")
+async def get_family_report(days: int = 7, current_user: dict = Depends(get_current_user)):
+    """Obtener reporte de la familia"""
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="No tienes una familia")
+    
+    family_id = current_user["family_id"]
+    start_date = datetime.utcnow() - timedelta(days=days)
+    
+    # Get all children
+    children = await db.children.find({"family_id": family_id}).to_list(100)
+    
+    # Get tasks completed in period
+    tasks_in_period = await db.chores.find({
+        "family_id": family_id,
+        "status": "aprobada",
+        "completed_at": {"$gte": start_date}
+    }).to_list(1000)
+    
+    # Get payments in period
+    payments_in_period = await db.payments.find({
+        "family_id": family_id,
+        "created_at": {"$gte": start_date}
+    }).to_list(1000)
+    
+    # Calculate daily stats
+    daily_stats = {}
+    for i in range(days):
+        day = datetime.utcnow() - timedelta(days=i)
+        day_str = day.strftime("%Y-%m-%d")
+        daily_stats[day_str] = {
+            "tasks_completed": 0,
+            "amount_paid": 0.0
+        }
+    
+    for task in tasks_in_period:
+        if task.get("completed_at"):
+            day_str = task["completed_at"].strftime("%Y-%m-%d")
+            if day_str in daily_stats:
+                daily_stats[day_str]["tasks_completed"] += 1
+    
+    for payment in payments_in_period:
+        day_str = payment["created_at"].strftime("%Y-%m-%d")
+        if day_str in daily_stats:
+            daily_stats[day_str]["amount_paid"] += payment["amount"]
+    
+    # Stats per child
+    children_stats = []
+    for child in children:
+        child_tasks = [t for t in tasks_in_period if t.get("completed_by") == child["id"]]
+        child_payments = [p for p in payments_in_period if p.get("child_id") == child["id"]]
+        children_stats.append({
+            "child_id": child["id"],
+            "name": child["name"],
+            "tasks_completed": len(child_tasks),
+            "amount_earned": sum(p["amount"] for p in child_payments),
+            "balance": child.get("balance", 0.0),
+            "current_streak": child.get("current_streak", 0)
+        })
+    
+    return {
+        "period_days": days,
+        "total_tasks_completed": len(tasks_in_period),
+        "total_amount_paid": sum(p["amount"] for p in payments_in_period),
+        "daily_stats": daily_stats,
+        "children_stats": children_stats
+    }
+
+# ==================== GOALS ENDPOINTS (METAS) ====================
+
+@api_router.post("/goals", response_model=GoalResponse)
+async def create_goal(goal_data: GoalCreate, current_user: dict = Depends(get_current_user)):
+    """Crear una nueva meta para un hijo"""
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="Debes crear una familia primero")
+    
+    # Verify child exists
+    child = await db.children.find_one({"id": goal_data.child_id, "family_id": current_user["family_id"]})
+    if not child:
+        raise HTTPException(status_code=404, detail="Hijo no encontrado")
+    
+    goal_id = str(uuid.uuid4())
+    goal = {
+        "id": goal_id,
+        "title": goal_data.title,
+        "description": goal_data.description,
+        "target_tasks": goal_data.target_tasks,
+        "bonus_amount": goal_data.bonus_amount,
+        "child_id": goal_data.child_id,
+        "completed_tasks": 0,
+        "is_completed": False,
+        "bonus_paid": False,
+        "start_date": datetime.fromisoformat(goal_data.start_date) if goal_data.start_date else datetime.utcnow(),
+        "end_date": datetime.fromisoformat(goal_data.end_date) if goal_data.end_date else None,
+        "family_id": current_user["family_id"],
+        "created_at": datetime.utcnow()
+    }
+    await db.goals.insert_one(goal)
+    
+    # Create notification
+    await create_notification(
+        current_user["family_id"],
+        "goal_created",
+        "Nueva meta creada",
+        f"Se ha creado la meta '{goal_data.title}' para {child['name']}",
+        goal_data.child_id
+    )
+    
+    return GoalResponse(**goal)
+
+@api_router.get("/goals", response_model=List[GoalResponse])
+async def get_goals(child_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    """Obtener todas las metas de la familia"""
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="No tienes una familia")
+    
+    query = {"family_id": current_user["family_id"]}
+    if child_id:
+        query["child_id"] = child_id
+    
+    goals = await db.goals.find(query).sort("created_at", -1).to_list(100)
+    return [GoalResponse(**g) for g in goals]
+
+@api_router.get("/goals/{goal_id}", response_model=GoalResponse)
+async def get_goal(goal_id: str, current_user: dict = Depends(get_current_user)):
+    """Obtener una meta específica"""
+    goal = await db.goals.find_one({"id": goal_id, "family_id": current_user.get("family_id")})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    return GoalResponse(**goal)
+
+@api_router.put("/goals/{goal_id}", response_model=GoalResponse)
+async def update_goal(goal_id: str, goal_data: GoalUpdate, current_user: dict = Depends(get_current_user)):
+    """Actualizar una meta"""
+    goal = await db.goals.find_one({"id": goal_id, "family_id": current_user.get("family_id")})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    
+    update_data = {k: v for k, v in goal_data.dict().items() if v is not None}
+    if update_data:
+        await db.goals.update_one({"id": goal_id}, {"$set": update_data})
+    
+    updated = await db.goals.find_one({"id": goal_id})
+    return GoalResponse(**updated)
+
+@api_router.delete("/goals/{goal_id}")
+async def delete_goal(goal_id: str, current_user: dict = Depends(get_current_user)):
+    """Eliminar una meta"""
+    goal = await db.goals.find_one({"id": goal_id, "family_id": current_user.get("family_id")})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    
+    await db.goals.delete_one({"id": goal_id})
+    return {"message": "Meta eliminada correctamente"}
+
+@api_router.post("/goals/{goal_id}/pay-bonus", response_model=GoalResponse)
+async def pay_goal_bonus(goal_id: str, current_user: dict = Depends(get_current_user)):
+    """Pagar el bono de una meta completada"""
+    goal = await db.goals.find_one({"id": goal_id, "family_id": current_user.get("family_id")})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    
+    if not goal["is_completed"]:
+        raise HTTPException(status_code=400, detail="La meta aún no está completada")
+    
+    if goal["bonus_paid"]:
+        raise HTTPException(status_code=400, detail="El bono ya fue pagado")
+    
+    # Add bonus to child's balance
+    await db.children.update_one(
+        {"id": goal["child_id"]},
+        {"$inc": {"balance": goal["bonus_amount"]}}
+    )
+    
+    # Mark bonus as paid
+    await db.goals.update_one(
+        {"id": goal_id},
+        {"$set": {"bonus_paid": True}}
+    )
+    
+    # Create payment record
+    payment = {
+        "id": str(uuid.uuid4()),
+        "child_id": goal["child_id"],
+        "chore_id": goal_id,
+        "chore_title": f"Bono: {goal['title']}",
+        "amount": goal["bonus_amount"],
+        "status": "aprobado",
+        "family_id": current_user["family_id"],
+        "created_at": datetime.utcnow()
+    }
+    await db.payments.insert_one(payment)
+    
+    # Create notification
+    child = await db.children.find_one({"id": goal["child_id"]})
+    await create_notification(
+        current_user["family_id"],
+        "bonus_paid",
+        "¡Bono pagado!",
+        f"{child['name']} recibió un bono de {goal['bonus_amount']} por completar la meta '{goal['title']}'",
+        goal["child_id"]
+    )
+    
+    updated = await db.goals.find_one({"id": goal_id})
+    return GoalResponse(**updated)
+
+# ==================== NOTIFICATIONS ENDPOINTS ====================
+
+async def create_notification(family_id: str, notif_type: str, title: str, message: str, child_id: Optional[str] = None):
+    """Helper function to create notifications"""
+    notification = {
+        "id": str(uuid.uuid4()),
+        "type": notif_type,
+        "title": title,
+        "message": message,
+        "child_id": child_id,
+        "is_read": False,
+        "family_id": family_id,
+        "created_at": datetime.utcnow()
+    }
+    await db.notifications.insert_one(notification)
+    return notification
+
+@api_router.get("/notifications", response_model=List[NotificationResponse])
+async def get_notifications(unread_only: bool = False, current_user: dict = Depends(get_current_user)):
+    """Obtener notificaciones de la familia"""
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="No tienes una familia")
+    
+    query = {"family_id": current_user["family_id"]}
+    if unread_only:
+        query["is_read"] = False
+    
+    notifications = await db.notifications.find(query).sort("created_at", -1).to_list(100)
+    return [NotificationResponse(**n) for n in notifications]
+
+@api_router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Marcar notificación como leída"""
+    await db.notifications.update_one(
+        {"id": notification_id, "family_id": current_user.get("family_id")},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "Notificación marcada como leída"}
+
+@api_router.post("/notifications/read-all")
+async def mark_all_notifications_read(current_user: dict = Depends(get_current_user)):
+    """Marcar todas las notificaciones como leídas"""
+    await db.notifications.update_many(
+        {"family_id": current_user.get("family_id")},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "Todas las notificaciones marcadas como leídas"}
+
+@api_router.get("/notifications/count")
+async def get_unread_count(current_user: dict = Depends(get_current_user)):
+    """Obtener cantidad de notificaciones no leídas"""
+    if not current_user.get("family_id"):
+        return {"unread_count": 0}
+    
+    count = await db.notifications.count_documents({
+        "family_id": current_user["family_id"],
+        "is_read": False
+    })
+    return {"unread_count": count}
+
+# ==================== ACHIEVEMENTS ENDPOINTS (LOGROS) ====================
+
+ACHIEVEMENTS_DEFINITIONS = {
+    "first_task": {"title": "Primera Tarea", "description": "Completaste tu primera tarea", "icon": "star"},
+    "tasks_5": {"title": "Trabajador", "description": "Completaste 5 tareas", "icon": "medal"},
+    "tasks_10": {"title": "Súper Trabajador", "description": "Completaste 10 tareas", "icon": "trophy"},
+    "tasks_25": {"title": "Experto", "description": "Completaste 25 tareas", "icon": "ribbon"},
+    "tasks_50": {"title": "Maestro", "description": "Completaste 50 tareas", "icon": "crown"},
+    "streak_3": {"title": "Racha de 3", "description": "3 días consecutivos completando tareas", "icon": "flame"},
+    "streak_7": {"title": "Racha Semanal", "description": "7 días consecutivos completando tareas", "icon": "flame"},
+    "streak_14": {"title": "Racha de 2 Semanas", "description": "14 días consecutivos", "icon": "flame"},
+    "streak_30": {"title": "Racha Mensual", "description": "30 días consecutivos completando tareas", "icon": "flame"},
+    "goal_completed": {"title": "Meta Cumplida", "description": "Completaste tu primera meta", "icon": "flag"},
+    "earned_100": {"title": "Primer Centenario", "description": "Ganaste 100 en total", "icon": "cash"},
+    "earned_500": {"title": "Ahorrador", "description": "Ganaste 500 en total", "icon": "wallet"},
+}
+
+async def check_and_award_achievements(child_id: str, family_id: str):
+    """Check and award achievements to a child"""
+    child = await db.children.find_one({"id": child_id})
+    if not child:
+        return
+    
+    # Get existing achievements
+    existing = await db.achievements.find({"child_id": child_id}).to_list(100)
+    existing_types = [a["type"] for a in existing]
+    
+    # Count approved tasks
+    task_count = await db.chores.count_documents({
+        "completed_by": child_id,
+        "status": "aprobada"
+    })
+    
+    # Check task milestones
+    task_milestones = [
+        ("first_task", 1),
+        ("tasks_5", 5),
+        ("tasks_10", 10),
+        ("tasks_25", 25),
+        ("tasks_50", 50)
+    ]
+    
+    for achievement_type, required in task_milestones:
+        if task_count >= required and achievement_type not in existing_types:
+            await award_achievement(child_id, family_id, achievement_type)
+    
+    # Check streak achievements
+    streak = child.get("current_streak", 0)
+    streak_milestones = [
+        ("streak_3", 3),
+        ("streak_7", 7),
+        ("streak_14", 14),
+        ("streak_30", 30)
+    ]
+    
+    for achievement_type, required in streak_milestones:
+        if streak >= required and achievement_type not in existing_types:
+            await award_achievement(child_id, family_id, achievement_type)
+    
+    # Check earnings achievements
+    total_earned = await db.payments.aggregate([
+        {"$match": {"child_id": child_id}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+    ]).to_list(1)
+    
+    total = total_earned[0]["total"] if total_earned else 0
+    earning_milestones = [
+        ("earned_100", 100),
+        ("earned_500", 500)
+    ]
+    
+    for achievement_type, required in earning_milestones:
+        if total >= required and achievement_type not in existing_types:
+            await award_achievement(child_id, family_id, achievement_type)
+
+async def award_achievement(child_id: str, family_id: str, achievement_type: str):
+    """Award an achievement to a child"""
+    if achievement_type not in ACHIEVEMENTS_DEFINITIONS:
+        return
+    
+    definition = ACHIEVEMENTS_DEFINITIONS[achievement_type]
+    achievement = {
+        "id": str(uuid.uuid4()),
+        "type": achievement_type,
+        "title": definition["title"],
+        "description": definition["description"],
+        "icon": definition["icon"],
+        "child_id": child_id,
+        "earned_at": datetime.utcnow()
+    }
+    await db.achievements.insert_one(achievement)
+    
+    # Create notification
+    child = await db.children.find_one({"id": child_id})
+    await create_notification(
+        family_id,
+        "achievement",
+        f"¡Nuevo logro!",
+        f"{child['name']} desbloqueó el logro '{definition['title']}'",
+        child_id
+    )
+
+@api_router.get("/achievements/child/{child_id}", response_model=List[AchievementResponse])
+async def get_child_achievements(child_id: str, current_user: dict = Depends(get_current_user)):
+    """Obtener logros de un hijo"""
+    child = await db.children.find_one({"id": child_id, "family_id": current_user.get("family_id")})
+    if not child:
+        raise HTTPException(status_code=404, detail="Hijo no encontrado")
+    
+    achievements = await db.achievements.find({"child_id": child_id}).sort("earned_at", -1).to_list(100)
+    return [AchievementResponse(**a) for a in achievements]
+
+@api_router.get("/achievements/definitions")
+async def get_achievement_definitions():
+    """Obtener todas las definiciones de logros"""
+    return ACHIEVEMENTS_DEFINITIONS
+
+# ==================== STREAK MANAGEMENT ====================
+
+async def update_child_streak(child_id: str, family_id: str):
+    """Update streak for a child when they complete a task"""
+    child = await db.children.find_one({"id": child_id})
+    if not child:
+        return
+    
+    today = datetime.utcnow().date()
+    last_task_date = child.get("last_task_date")
+    current_streak = child.get("current_streak", 0)
+    best_streak = child.get("best_streak", 0)
+    
+    if last_task_date:
+        last_date = last_task_date.date() if isinstance(last_task_date, datetime) else last_task_date
+        days_diff = (today - last_date).days
+        
+        if days_diff == 0:
+            # Already counted today
+            return
+        elif days_diff == 1:
+            # Consecutive day
+            current_streak += 1
+        else:
+            # Streak broken
+            current_streak = 1
+    else:
+        current_streak = 1
+    
+    # Update best streak if needed
+    if current_streak > best_streak:
+        best_streak = current_streak
+    
+    await db.children.update_one(
+        {"id": child_id},
+        {
+            "$set": {
+                "last_task_date": datetime.utcnow(),
+                "current_streak": current_streak,
+                "best_streak": best_streak
+            }
+        }
+    )
+    
+    # Check for achievements
+    await check_and_award_achievements(child_id, family_id)
 
 # ==================== ROOT ENDPOINT ====================
 

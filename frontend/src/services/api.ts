@@ -143,6 +143,71 @@ export const statsAPI = {
     const response = await api.get(`/stats/child/${childId}`);
     return response.data;
   },
+  getFamilyReport: async (days: number = 7) => {
+    const response = await api.get(`/stats/family/report?days=${days}`);
+    return response.data;
+  },
+};
+
+// Goals API (Metas)
+export const goalsAPI = {
+  create: async (title: string, description: string | undefined, target_tasks: number, bonus_amount: number, child_id: string, start_date?: string, end_date?: string) => {
+    const response = await api.post('/goals', { title, description, target_tasks, bonus_amount, child_id, start_date, end_date });
+    return response.data;
+  },
+  getAll: async (childId?: string) => {
+    const params = childId ? { child_id: childId } : {};
+    const response = await api.get('/goals', { params });
+    return response.data;
+  },
+  getOne: async (goalId: string) => {
+    const response = await api.get(`/goals/${goalId}`);
+    return response.data;
+  },
+  update: async (goalId: string, data: any) => {
+    const response = await api.put(`/goals/${goalId}`, data);
+    return response.data;
+  },
+  delete: async (goalId: string) => {
+    const response = await api.delete(`/goals/${goalId}`);
+    return response.data;
+  },
+  payBonus: async (goalId: string) => {
+    const response = await api.post(`/goals/${goalId}/pay-bonus`);
+    return response.data;
+  },
+};
+
+// Notifications API
+export const notificationsAPI = {
+  getAll: async (unreadOnly: boolean = false) => {
+    const response = await api.get(`/notifications?unread_only=${unreadOnly}`);
+    return response.data;
+  },
+  getUnreadCount: async () => {
+    const response = await api.get('/notifications/count');
+    return response.data;
+  },
+  markRead: async (notificationId: string) => {
+    const response = await api.post(`/notifications/${notificationId}/read`);
+    return response.data;
+  },
+  markAllRead: async () => {
+    const response = await api.post('/notifications/read-all');
+    return response.data;
+  },
+};
+
+// Achievements API (Logros)
+export const achievementsAPI = {
+  getForChild: async (childId: string) => {
+    const response = await api.get(`/achievements/child/${childId}`);
+    return response.data;
+  },
+  getDefinitions: async () => {
+    const response = await api.get('/achievements/definitions');
+    return response.data;
+  },
 };
 
 export default api;
