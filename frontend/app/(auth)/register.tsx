@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import FlagStripe from '../../src/components/FlagStripe';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{
     name?: string;
@@ -66,7 +68,7 @@ export default function RegisterScreen() {
     if (!validateForm()) return;
 
     try {
-      await register(email, password, name);
+      await register(email, password, name, inviteCode.trim() || undefined);
       router.replace('/(parent)/home');
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Error al crear la cuenta';
@@ -83,6 +85,7 @@ export default function RegisterScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        <FlagStripe height={4} style={styles.flagStripe} />
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -154,6 +157,25 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputContainer}>
+            <Text style={styles.label}>Código de invitación (opcional)</Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="people-outline" size={20} color={Colors.textSecondary} />
+              <TextInput
+                style={styles.input}
+                placeholder="Si te invitaron a una familia"
+                placeholderTextColor={Colors.textLight}
+                value={inviteCode}
+                onChangeText={(t) => setInviteCode(t.toUpperCase())}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+            </View>
+            <Text style={styles.hintText}>
+              Déjalo vacío si vas a crear tu propia familia después de registrarte.
+            </Text>
+          </View>
+
+          <View style={styles.inputContainer}>
             <Text style={styles.label}>Confirmar Contraseña</Text>
             <View style={[styles.inputWrapper, errors.confirmPassword && styles.inputError]}>
               <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} />
@@ -171,6 +193,19 @@ export default function RegisterScreen() {
             )}
           </View>
 
+          <Text style={styles.legalAccept}>
+            Al crear una cuenta declaras ser mayor de edad o actuar con autoridad parental sobre los
+            menores que registres, y aceptas los{' '}
+            <Text style={styles.legalInlineLink} onPress={() => router.push('/(public)/terms')}>
+              Términos de uso
+            </Text>
+            {' '}y la{' '}
+            <Text style={styles.legalInlineLink} onPress={() => router.push('/(public)/privacy')}>
+              Política de privacidad
+            </Text>
+            .
+          </Text>
+
           <TouchableOpacity
             style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
             onPress={handleRegister}
@@ -181,6 +216,14 @@ export default function RegisterScreen() {
             ) : (
               <Text style={styles.submitButtonText}>Crear Cuenta</Text>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.childEntryButton}
+            onPress={() => router.push('/(auth)/child-login')}
+          >
+            <Ionicons name="happy-outline" size={22} color={Colors.secondary} />
+            <Text style={styles.childEntryButtonText}>Soy hijo o hija</Text>
           </TouchableOpacity>
 
           <View style={styles.footer}>
@@ -203,7 +246,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingTop: 60,
+    paddingTop: 56,
+  },
+  flagStripe: {
+    marginHorizontal: -24,
+    marginBottom: 16,
   },
   backButton: {
     width: 40,
@@ -261,6 +308,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.error,
   },
+  hintText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  legalAccept: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  legalInlineLink: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
   submitButton: {
     backgroundColor: Colors.primary,
     paddingVertical: 16,
@@ -275,6 +339,23 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 18,
     fontWeight: '600',
+  },
+  childEntryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.secondary,
+    backgroundColor: Colors.surface,
+    marginTop: 8,
+  },
+  childEntryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.secondary,
   },
   footer: {
     flexDirection: 'row',

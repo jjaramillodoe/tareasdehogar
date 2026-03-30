@@ -10,10 +10,11 @@ import {
   Alert,
   Modal,
   TextInput,
+  Image,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
-import { childrenAPI } from '../../src/services/api';
+import { childrenAPI, savingsGoalsAPI, SavingsGoalDTO } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -22,8 +23,18 @@ interface Child {
   name: string;
   age: number;
   alias?: string;
+  gender?: 'mujer' | 'hombre' | null;
   balance: number;
   family_id: string;
+  savings_on_approve_percent?: number;
+  savings_on_approve_goal_id?: string | null;
+}
+
+function getChildAvatarSource(gender?: 'mujer' | 'hombre' | null) {
+  if (gender === 'mujer') {
+    return require('../../assets/images/mujer.png');
+  }
+  return require('../../assets/images/hombre.png');
 }
 
 export default function ChildrenScreen() {
@@ -34,12 +45,24 @@ export default function ChildrenScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingChild, setEditingChild] = useState<Child | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    age: string;
+    alias: string;
+    pin: string;
+    gender: 'mujer' | 'hombre';
+    savingsPercent: string;
+    savingsGoalId: string;
+  }>({
     name: '',
     age: '',
     alias: '',
     pin: '',
+    gender: 'mujer',
+    savingsPercent: '0',
+    savingsGoalId: '',
   });
+  const [savingsGoalOptions, setSavingsGoalOptions] = useState<SavingsGoalDTO[]>([]);
   const [saving, setSaving] = useState(false);
 
   const loadChildren = async () => {
@@ -60,7 +83,7 @@ export default function ChildrenScreen() {
     }, [])
   );
 
-  const openModal = (child?: Child) => {
+  const openModal = async (child?: Child) => {
     if (child) {
       setEditingChild(child);
       setFormData({
@@ -68,10 +91,31 @@ export default function ChildrenScreen() {
         age: child.age.toString(),
         alias: child.alias || '',
         pin: '',
+        gender: child.gender === 'hombre' ? 'hombre' : 'mujer',
+        savingsPercent:
+          child.savings_on_approve_percent != null && !Number.isNaN(Number(child.savings_on_approve_percent))
+            ? String(child.savings_on_approve_percent)
+            : '0',
+        savingsGoalId: child.savings_on_approve_goal_id || '',
       });
+      try {
+        const sg = await savingsGoalsAPI.getAll(child.id);
+        setSavingsGoalOptions(sg.filter((g) => !g.is_completed));
+      } catch {
+        setSavingsGoalOptions([]);
+      }
     } else {
       setEditingChild(null);
-      setFormData({ name: '', age: '', alias: '', pin: '' });
+      setFormData({
+        name: '',
+        age: '',
+        alias: '',
+        pin: '',
+        gender: 'mujer',
+        savingsPercent: '0',
+        savingsGoalId: '',
+      });
+      setSavingsGoalOptions([]);
     }
     setShowModal(true);
   };
@@ -91,11 +135,16 @@ export default function ChildrenScreen() {
     setSaving(true);
     try {
       if (editingChild) {
+        const rawPct = parseFloat(formData.savingsPercent.replace(',', '.'));
+        const savingsPct = Number.isNaN(rawPct) ? 0 : Math.min(100, Math.max(0, rawPct));
         await childrenAPI.update(editingChild.id, {
           name: formData.name.trim(),
           age,
           alias: formData.alias.trim() || undefined,
           pin: formData.pin || undefined,
+          gender: formData.gender,
+          savings_on_approve_percent: savingsPct,
+          savings_on_approve_goal_id: formData.savingsGoalId.trim() || null,
         });
         Alert.alert('Éxito', 'Hijo actualizado correctamente');
       } else {
@@ -103,7 +152,8 @@ export default function ChildrenScreen() {
           formData.name.trim(),
           age,
           formData.alias.trim() || undefined,
-          formData.pin || undefined
+          formData.pin || undefined,
+          formData.gender
         );
         Alert.alert('Éxito', 'Hijo agregado correctamente');
       }
@@ -215,14 +265,24 @@ export default function ChildrenScreen() {
           children.map((child) => (
             <View key={child.id} style={styles.childCard}>
               <View style={styles.childAvatar}>
-                <Text style={styles.childInitial}>{child.name.charAt(0)}</Text>
+                <Image source={getChildAvatarSource(child.gender)} style={styles.childAvatarImage} />
               </View>
               <View style={styles.childInfo}>
-                <Text style={styles.childName}>{child.name}</Text>
+                <Text style={styles.childName} numberOfLines={1} ellipsizeMode="tail">
+                  {child.name}
+                </Text>
                 {child.alias && child.alias !== child.name && (
-                  <Text style={styles.childAlias}>Alias: {child.alias}</Text>
+                  <Text style={styles.childAlias} numberOfLines={1} ellipsizeMode="tail">
+                    Alias: {child.alias}
+                  </Text>
                 )}
                 <Text style={styles.childAge}>{child.age} años</Text>
+                <View style={styles.savingsBadge}>
+                  <Ionicons name="leaf-outline" size={12} color={Colors.primary} />
+                  <Text style={styles.savingsBadgeText}>
+                    Ahorro automático {Number(child.savings_on_approve_percent ?? 0).toFixed(0)}%
+                  </Text>
+                </View>
                 <View style={styles.balanceContainer}>
                   <Ionicons name="wallet-outline" size={14} color={Colors.secondary} />
                   <Text style={styles.balanceText}>
@@ -268,6 +328,7 @@ export default function ChildrenScreen() {
               {editingChild ? 'Editar Hijo' : 'Agregar Hijo'}
             </Text>
 
+            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Nombre *</Text>
               <TextInput
@@ -290,6 +351,58 @@ export default function ChildrenScreen() {
                 keyboardType="numeric"
                 maxLength={2}
               />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Mujer o Hombre</Text>
+              <View style={styles.genderRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.genderOption,
+                    formData.gender === 'mujer' && styles.genderOptionMujerActive,
+                  ]}
+                  onPress={() => setFormData({ ...formData, gender: 'mujer' })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: formData.gender === 'mujer' }}
+                >
+                  <Ionicons
+                    name="female-outline"
+                    size={22}
+                    color={formData.gender === 'mujer' ? Colors.white : Colors.accent}
+                  />
+                  <Text
+                    style={[
+                      styles.genderOptionText,
+                      formData.gender === 'mujer' && styles.genderOptionTextOnPink,
+                    ]}
+                  >
+                    Mujer
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.genderOption,
+                    formData.gender === 'hombre' && styles.genderOptionHombreActive,
+                  ]}
+                  onPress={() => setFormData({ ...formData, gender: 'hombre' })}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: formData.gender === 'hombre' }}
+                >
+                  <Ionicons
+                    name="male-outline"
+                    size={22}
+                    color={formData.gender === 'hombre' ? Colors.white : Colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.genderOptionText,
+                      formData.gender === 'hombre' && styles.genderOptionTextOnBlue,
+                    ]}
+                  >
+                    Hombre
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
@@ -319,6 +432,53 @@ export default function ChildrenScreen() {
                 El PIN permite al hijo acceder a su vista
               </Text>
             </View>
+
+            {editingChild ? (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>% del pago al aprobar tareas → ahorro</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textLight}
+                  value={formData.savingsPercent}
+                  onChangeText={(text) => setFormData({ ...formData, savingsPercent: text })}
+                  keyboardType="decimal-pad"
+                />
+                <Text style={styles.inputHint}>
+                  0 = todo va al saldo. Si hay meta de ahorro activa, esa parte se aparta al aprobar cada tarea (hasta
+                  completar la meta).
+                </Text>
+                <Text style={[styles.inputLabel, { marginTop: 12 }]}>Meta preferida (opcional)</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.goalPickRow,
+                    !formData.savingsGoalId && styles.goalPickRowActive,
+                  ]}
+                  onPress={() => setFormData({ ...formData, savingsGoalId: '' })}
+                >
+                  <Text style={styles.goalPickText}>Primera meta activa (automático)</Text>
+                </TouchableOpacity>
+                {savingsGoalOptions.map((g) => (
+                  <TouchableOpacity
+                    key={g.id}
+                    style={[
+                      styles.goalPickRow,
+                      formData.savingsGoalId === g.id && styles.goalPickRowActive,
+                    ]}
+                    onPress={() => setFormData({ ...formData, savingsGoalId: g.id })}
+                  >
+                    <Text style={styles.goalPickText} numberOfLines={2}>
+                      {g.title} ({family?.currency} {g.saved_amount.toFixed(0)} / {g.target_amount.toFixed(0)})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {savingsGoalOptions.length === 0 ? (
+                  <Text style={styles.inputHint}>Crea una meta de ahorro en Metas → Ahorro para este hijo.</Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            </ScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -441,25 +601,63 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   childAvatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: Colors.primaryLight,
+    backgroundColor: Colors.surfaceAlt,
   },
-  childInitial: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  childAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  genderOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  genderOptionMujerActive: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accent,
+  },
+  genderOptionHombreActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  genderOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  genderOptionTextOnPink: {
+    color: Colors.white,
+  },
+  genderOptionTextOnBlue: {
     color: Colors.white,
   },
   childInfo: {
     flex: 1,
     marginLeft: 16,
+    marginRight: 8,
+    minWidth: 0,
   },
   childName: {
     fontSize: 18,
@@ -476,6 +674,22 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
   },
+  savingsBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primary + '12',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  savingsBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
   balanceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -490,11 +704,14 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row',
     gap: 8,
+    marginLeft: 4,
+    flexShrink: 0,
+    alignSelf: 'center',
   },
   cardActionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
@@ -503,12 +720,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.overlay,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
   },
   modalContent: {
     backgroundColor: Colors.surface,
     borderRadius: 20,
     padding: 24,
+    maxHeight: '90%',
+    width: '100%',
+    maxWidth: 420,
+  },
+  modalScroll: {
+    maxHeight: 420,
   },
   modalTitle: {
     fontSize: 22,
@@ -539,6 +763,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     marginTop: 4,
+  },
+  goalPickRow: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 8,
+    backgroundColor: Colors.background,
+  },
+  goalPickRowActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '14',
+  },
+  goalPickText: {
+    fontSize: 14,
+    color: Colors.text,
   },
   modalButtons: {
     flexDirection: 'row',

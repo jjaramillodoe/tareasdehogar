@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import FlagStripe from '../../src/components/FlagStripe';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -62,6 +63,7 @@ export default function LoginScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        <FlagStripe height={4} style={styles.flagStripe} />
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -128,6 +130,17 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.childEntryButton}
+            onPress={() => router.push('/(auth)/child-login')}
+          >
+            <Ionicons name="happy-outline" size={22} color={Colors.secondary} />
+            <Text style={styles.childEntryButtonText}>Soy hijo o hija</Text>
+          </TouchableOpacity>
+          <Text style={styles.childEntryHint}>
+            Usa el código de familia que te dieron (no necesitas correo)
+          </Text>
+
           <View style={styles.footer}>
             <Text style={styles.footerText}>¿No tienes cuenta?</Text>
             <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
@@ -148,7 +161,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingTop: 60,
+    paddingTop: 56,
+  },
+  flagStripe: {
+    marginHorizontal: -24,
+    marginBottom: 16,
   },
   backButton: {
     width: 40,
@@ -220,6 +237,31 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 18,
     fontWeight: '600',
+  },
+  childEntryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.secondary,
+    backgroundColor: Colors.surface,
+    marginTop: 8,
+  },
+  childEntryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.secondary,
+  },
+  childEntryHint: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 8,
   },
   footer: {
     flexDirection: 'row',

@@ -1,317 +1,212 @@
-# 🏠 Tareas del Hogar
+# 🏠 HabitApp
 
-Una aplicación móvil completa para que los padres gestionen las tareas del hogar de sus hijos y los recompensen por su esfuerzo.
+Una aplicación móvil completa para que los padres gestionen las tareas del hogar de sus hijos y los recompensen por su esfuerzo, con foco en hábitos, ahorro y educación financiera familiar.
 
 ![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20Web-blue)
 ![Framework](https://img.shields.io/badge/Framework-Expo%20%7C%20React%20Native-purple)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Database](https://img.shields.io/badge/Database-MongoDB-brightgreen)
 
-## 📱 Características Principales
+## 📱 Características principales
 
-### Para Padres/Tutores
-- ✅ **Gestión de Familia**: Crear y configurar la familia con divisa personalizada
-- 👨‍👩‍👧‍👦 **Gestión de Hijos**: Agregar hijos (menores de 19 años) con PIN opcional
-- 📋 **Tareas Predefinidas**: 18 tareas comunes del hogar listas para usar
-- 💰 **Sistema de Pagos**: Asignar montos a cada tarea
-- ✔️ **Aprobación de Tareas**: Revisar y aprobar tareas completadas
-- 🎯 **Metas y Bonos**: Crear metas semanales con bonos extra
-- 📊 **Reportes**: Estadísticas y gráficas de progreso
-- 🔔 **Notificaciones**: Centro de alertas en tiempo real
+### Para padres / tutores
+- **Gestión de familia**: divisa, país/región, código de acceso para hijos, invitaciones a otros tutores.
+- **Hijos**: perfiles, PIN opcional, avatar según género, límites y reglas de dinero.
+- **Tareas**: creación, calendario, aprobación con reparto a saldo y metas de ahorro (auto‑ahorro, match, bonos).
+- **Retiros**: solicitudes de los hijos, aprobación individual o **aprobación masiva** de montos pequeños.
+- **Metas** (tareas y ahorro), **logros**, **reportes** (7/14 días), **notificaciones** (borrado masivo o selectivo).
+- **Dinero a tener listo**: resumen de retiros pendientes en inicio y perfil.
+- **Perfil — administración y seguridad**:
+  - Exportar / importar **respaldo JSON** de actividad (vista previa antes de aplicar).
+  - Reset de actividad (completo o parcial), modo demo (sembrar / limpiar datos de prueba).
+  - **Bitácora de auditoría** (acciones sensibles).
+  - **Sesiones** por dispositivo (listar y cerrar una sesión o todas).
+  - **Auto‑logout** por inactividad (configurable).
+  - **Bloqueo por intentos fallidos de PIN** (límites configurables a nivel familia).
+  - **Permisos por rol** (owner / admin / parent) para reset, aprobar retiros y editar metas.
+  - **Horas silenciosas** con selector de hora y **presets** (ej. 22:00–06:00).
+  - **Valores recomendados Ecuador** (un toque) para montos y reglas típicas.
+- **Diagnóstico** en perfil: estado API, BD, último respaldo exportado.
 
-### Para Hijos
-- 📝 Ver tareas asignadas
-- ✅ Marcar tareas como completadas
-- 💵 Ver saldo acumulado
-- 🏆 Desbloquear logros
-- 🔥 Sistema de rachas diarias
+### Para hijos
+- Tareas, pagos, retiros, metas de ahorro, logros, reporte simple, notificaciones.
+- Flujos de **necesidad vs. deseo** y celebraciones por hitos de ahorro.
+
+## 🆕 Novedades recientes (resumen)
+
+| Área | Qué incluye |
+|------|-------------|
+| Seguridad | JWT con `token_version` / `session_version` (invalidar sesiones al cambiar contraseña o PIN), sesiones en `auth_sessions`, `POST /auth/logout-all-sessions`, bloqueo PIN tras N intentos |
+| Familia | Ajustes de notificaciones, reglas de retiros, demo, auto‑logout, permisos por rol, `pin_failed_attempt_limit`, `pin_lockout_minutes` |
+| Datos | Respaldo JSON, restauración con preview, reset parcial, demo seed/clear, bitácora `audit_logs` |
+| UX | Calendario alineado, tarjetas de hijos sin overflow, compartir invitación, reportes 7/14 días, perfil con chips y presets Ecuador |
 
 ## 🛠️ Tecnologías
 
 | Componente | Tecnología |
 |------------|------------|
-| Frontend | Expo / React Native |
-| Backend | FastAPI (Python) |
-| Base de Datos | MongoDB |
+| Frontend | Expo SDK 54 / React Native |
+| Backend | FastAPI (Python), `uvicorn server:app` |
+| Base de datos | MongoDB |
 | Autenticación | JWT |
 | Estado | Zustand |
-| HTTP Client | Axios |
+| HTTP | Axios |
 
-## 📁 Estructura del Proyecto
+## 📁 Estructura del proyecto
 
 ```
-/app
+tareasdehogar/
 ├── backend/
-│   ├── .env                 # Variables de entorno del backend
-│   ├── server.py            # API FastAPI
-│   └── requirements.txt     # Dependencias Python
+│   ├── .env                 # Variables de entorno (local; no subir a git)
+│   ├── server.py          # Punto de entrada ASGI → app.main
+│   ├── app/               # Routers, modelos, servicios
+│   ├── requirements.txt
+│   ├── pytest.ini
+│   ├── tests/
+│   └── seed_local_demo_data.py   # Datos demo (opcional)
 ├── frontend/
-│   ├── .env                 # Variables de entorno del frontend
-│   ├── app/                 # Pantallas (Expo Router)
-│   │   ├── (auth)/          # Pantallas de autenticación
-│   │   ├── (parent)/        # Pantallas para padres
-│   │   └── (child)/         # Pantallas para hijos
+│   ├── .env               # EXPO_PUBLIC_BACKEND_URL
+│   ├── app/               # Pantallas (Expo Router)
+│   │   ├── (auth)/
+│   │   ├── (parent)/
+│   │   └── (child)/
 │   ├── src/
-│   │   ├── components/      # Componentes reutilizables
-│   │   ├── constants/       # Colores y constantes
-│   │   ├── services/        # API client
-│   │   └── store/           # Estado global (Zustand)
+│   │   ├── components/
+│   │   ├── constants/
+│   │   ├── services/      # Cliente API
+│   │   └── store/
 │   └── package.json
+├── deploy.md              # Guía de despliegue (API + tiendas)
 └── README.md
 ```
 
 ## ⚙️ Configuración
 
-### Variables de Entorno - Backend
+### Backend — variables de entorno
 
-Crear archivo `/app/backend/.env`:
+Crear `backend/.env`:
 
 ```env
-# Base de datos MongoDB
 MONGO_URL="mongodb://localhost:27017"
 DB_NAME="tareas_hogar"
-
-# Seguridad JWT (generar una clave segura)
 JWT_SECRET="tu-clave-secreta-muy-larga-y-segura-aqui"
-
-# CORS (en producción, especificar dominios)
-CORS_ORIGINS="*"
 ```
 
-### Variables de Entorno - Frontend
+Opcional: `CORS_ORIGINS` si el servidor lo usa.
 
-Crear archivo `/app/frontend/.env`:
+### Frontend — variables de entorno
+
+Crear `frontend/.env`:
 
 ```env
-# URL del backend API
-EXPO_PUBLIC_BACKEND_URL="https://tu-dominio.com"
-
-# Configuración de Expo (opcional para desarrollo)
-EXPO_TUNNEL_SUBDOMAIN=tu-app
-EXPO_PACKAGER_HOSTNAME=https://tu-app.preview.emergentagent.com
+EXPO_PUBLIC_BACKEND_URL="http://localhost:8001"
 ```
 
-## 🚀 Instalación y Ejecución
+En producción sin barra final y con `https://`. Ver `deploy.md`.
 
-### Requisitos Previos
+## 🚀 Instalación y ejecución
+
+### Requisitos
 
 - Node.js 18+
 - Python 3.11+
 - MongoDB 6+
-- Expo CLI
+- Yarn o npm
 
 ### Backend
 
 ```bash
-# Navegar al directorio del backend
-cd /app/backend
-
-# Crear entorno virtual (opcional pero recomendado)
+cd backend
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# o
-.\venv\Scripts\activate  # Windows
-
-# Instalar dependencias
+source venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
-
-# Ejecutar servidor
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ### Frontend
 
 ```bash
-# Navegar al directorio del frontend
-cd /app/frontend
-
-# Instalar dependencias
+cd frontend
 yarn install
-# o
-npm install
-
-# Ejecutar en modo desarrollo
 npx expo start
-
-# Para web
-npx expo start --web
-
-# Para tunnel (acceso remoto)
-npx expo start --tunnel
 ```
 
-## 📚 API Endpoints
+### Datos demo locales (opcional)
 
-### Autenticación
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Registrar nuevo padre/tutor |
-| POST | `/api/auth/login` | Iniciar sesión |
-| GET | `/api/auth/me` | Obtener usuario actual |
+```bash
+cd backend
+python seed_local_demo_data.py --clean --profile ecuador
+```
 
-### Familia
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| POST | `/api/families` | Crear familia |
-| GET | `/api/families/my` | Obtener mi familia |
-| PUT | `/api/families/my` | Actualizar familia |
+No borra usuarios ni hijos; rellena tareas, pagos, metas, etc.
 
-### Hijos
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| POST | `/api/children` | Agregar hijo |
-| GET | `/api/children` | Listar hijos |
-| GET | `/api/children/{id}` | Obtener hijo |
-| PUT | `/api/children/{id}` | Actualizar hijo |
-| DELETE | `/api/children/{id}` | Eliminar hijo |
+## 📚 API — endpoints útiles (resumen)
 
-### Tareas
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| POST | `/api/chores` | Crear tarea |
-| GET | `/api/chores` | Listar tareas |
-| GET | `/api/chores/child/{id}` | Tareas de un hijo |
-| PUT | `/api/chores/{id}` | Actualizar tarea |
-| DELETE | `/api/chores/{id}` | Eliminar tarea |
-| POST | `/api/chores/{id}/complete` | Marcar completada |
-| POST | `/api/chores/{id}/approve` | Aprobar tarea |
-| POST | `/api/chores/{id}/reject` | Rechazar tarea |
+La API base es `{EXPO_PUBLIC_BACKEND_URL}/api` (el código del cliente añade `/api`).
 
-### Metas
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| POST | `/api/goals` | Crear meta |
-| GET | `/api/goals` | Listar metas |
-| PUT | `/api/goals/{id}` | Actualizar meta |
-| DELETE | `/api/goals/{id}` | Eliminar meta |
-| POST | `/api/goals/{id}/pay-bonus` | Pagar bono |
+**Autenticación**
+- `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `GET /auth/session`
+- `POST /auth/child-login`, `POST /auth/change-password`, `POST /auth/change-child-pin`
+- `POST /auth/logout-all-sessions`
+- `GET /auth/sessions`, `POST /auth/sessions/{session_id}/revoke`
 
-### Notificaciones
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| GET | `/api/notifications` | Listar notificaciones |
-| GET | `/api/notifications/count` | Contar no leídas |
-| POST | `/api/notifications/{id}/read` | Marcar como leída |
-| POST | `/api/notifications/read-all` | Marcar todas leídas |
+**Familia**
+- `GET/PUT /families/my`, `POST /families`, `GET /families/members`, `POST /families/invite`
+- `POST /families/reset-activity`, `POST /families/reset-activity/partial`
+- `GET /families/activity-backup`, `POST /families/activity-restore`
+- `GET /families/audit-log`, `GET /families/diagnostics`
+- `POST /families/demo/seed`, `POST /families/demo/clear`
 
-### Estadísticas
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| GET | `/api/stats/child/{id}` | Stats de un hijo |
-| GET | `/api/stats/family/report` | Reporte familiar |
+**Retiros**
+- `POST /withdrawals/request`, `GET /withdrawals`, aprobar/rechazar por id
+- `POST /withdrawals/approve-small/bulk`
 
-### Logros
-| Método | Endpoint | Descripción |
-|--------|----------|-------------|
-| GET | `/api/achievements/child/{id}` | Logros de un hijo |
-| GET | `/api/achievements/definitions` | Definiciones de logros |
+**Salud**
+- `GET /health` (raíz), `GET /api/health` si está montado en el router
 
-## 🏆 Sistema de Logros
+Lista completa en los routers bajo `backend/app/routers/`.
 
-| Logro | Requisito |
-|-------|-----------|
-| Primera Tarea | Completar 1 tarea |
-| Trabajador | Completar 5 tareas |
-| Súper Trabajador | Completar 10 tareas |
-| Experto | Completar 25 tareas |
-| Maestro | Completar 50 tareas |
-| Racha de 3 | 3 días consecutivos |
-| Racha Semanal | 7 días consecutivos |
-| Racha de 2 Semanas | 14 días consecutivos |
-| Racha Mensual | 30 días consecutivos |
-| Meta Cumplida | Completar primera meta |
-| Primer Centenario | Ganar 100 en total |
-| Ahorrador | Ganar 500 en total |
+## 🏆 Sistema de logros
 
-## 📋 Tareas Predefinidas
-
-La app incluye 18 tareas predefinidas:
-
-| Tarea | Monto Sugerido |
-|-------|----------------|
-| Limpiar la sala | $30 |
-| Limpiar el cuarto | $25 |
-| Limpiar la cocina | $35 |
-| Lavar los trastes | $20 |
-| Barrer el patio | $25 |
-| Sacar la basura | $10 |
-| Tender la cama | $10 |
-| Lavar la ropa | $40 |
-| Planchar la ropa | $30 |
-| Limpiar el baño | $35 |
-| Pasear al perro | $15 |
-| Alimentar mascotas | $10 |
-| Regar las plantas | $10 |
-| Hacer la tarea | $20 |
-| Lavar el carro | $50 |
-| Aspirar la casa | $30 |
-| Ordenar el closet | $25 |
-| Ayudar con la cena | $20 |
-
-## 🎨 Tema de Colores
-
-La app usa un tema vibrante con tres colores principales:
-
-- **Azul (Primary)**: `#2563EB` - Acciones principales
-- **Amarillo/Dorado (Secondary)**: `#F59E0B` - Dinero y recompensas
-- **Rojo (Accent)**: `#EF4444` - Alertas y destacados
+Incluye logros por tareas completadas, rachas, metas y ahorro (definiciones en el backend). Consulta `GET /achievements/definitions`.
 
 ## 🔐 Seguridad
 
-- Autenticación mediante JWT (JSON Web Tokens)
-- Contraseñas hasheadas con SHA-256
-- PIN opcional para acceso de hijos
-- Tokens con expiración de 7 días
-- Validación de edad (menores de 19 años)
+- JWT para padres e hijos; contraseñas y PIN con hash (SHA‑256 en backend actual).
+- **Versionado de tokens**: al cambiar contraseña o PIN, o al cerrar todas las sesiones, las sesiones anteriores dejan de ser válidas.
+- Sesiones de padre registradas en `auth_sessions` (opcional `sid` en el JWT).
+- Bloqueo temporal tras intentos fallidos de PIN (configurable por familia).
 
-## 📱 Pantallas de la App
+## 📱 Pantallas (orientación)
 
-### Autenticación
-- Pantalla de bienvenida con splash animado
-- Registro de padres/tutores
-- Inicio de sesión
+- **Padres**: Inicio, Hijos, Tareas, Calendario, Metas, Reportes, Alertas, Perfil (y más según rutas).
+- **Hijos**: Tareas, Pagos, Metas de ahorro, Reporte, Perfil, etc.
 
-### Panel de Padres
-- **Inicio**: Resumen, tareas pendientes de aprobación
-- **Hijos**: Gestión de perfiles de hijos
-- **Tareas**: Crear, asignar y gestionar tareas
-- **Metas**: Sistema de metas y bonos
-- **Reportes**: Estadísticas y gráficas
-- **Alertas**: Centro de notificaciones
-- **Perfil**: Configuración de familia y cuenta
-
-### Vista de Hijos
-- **Mis Tareas**: Tareas pendientes y completadas
-- **Historial**: Pagos recibidos
-
-## 🧪 Testing
+## 🧪 Pruebas
 
 ```bash
-# Test del backend
+# Salud del API
 curl http://localhost:8001/api/health
 
-# Test de autenticación
-curl -X POST http://localhost:8001/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@test.com","password":"123456","name":"Test User"}'
+# Backend (pytest)
+cd backend && pytest
 ```
 
 ## 📄 Licencia
 
-Este proyecto es de código abierto y está disponible bajo la licencia MIT.
+MIT (según versión anterior del proyecto).
 
 ## 👨‍💻 Autor
 
-Desarrollado con ❤️ para familias que quieren enseñar responsabilidad financiera a sus hijos.
+Desarrollado para familias que quieren enseñar responsabilidad y hábitos financieros.
 
 ---
 
 ## 🆘 Soporte
 
-Si tienes problemas o preguntas:
+1. MongoDB en ejecución y `MONGO_URL` correcto.
+2. `EXPO_PUBLIC_BACKEND_URL` alcanzable desde el dispositivo (no uses `localhost` en el móvil salvo emulador/túnel).
+3. Puertos: backend en `8001` por defecto en desarrollo.
+4. Despliegue en producción: **deploy.md**.
 
-1. Revisa que MongoDB esté corriendo
-2. Verifica las variables de entorno
-3. Asegúrate de que los puertos 8001 (backend) y 3000 (frontend) estén disponibles
-4. Revisa los logs del backend: `tail -f /var/log/supervisor/backend.err.log`
-5. Revisa los logs del frontend: `tail -f /var/log/supervisor/expo.err.log`
+Para más detalle operativo (HTTPS, EAS, tiendas), abre **[deploy.md](./deploy.md)**.

@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "App de Tareas del Hogar - Sistema para que padres paguen a hijos por tareas realizadas. Incluye autenticación JWT, gestión de familia, hijos, tareas y pagos simulados. Todo en español."
+user_problem_statement: "App de HabitApp - Sistema para que padres paguen a hijos por tareas realizadas. Incluye autenticación JWT, gestión de familia, hijos, tareas y pagos simulados. Todo en español."
 
 backend:
   - task: "User Registration"

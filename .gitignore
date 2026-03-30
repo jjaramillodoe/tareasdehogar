@@ -81,3 +81,24 @@ android-sdk/ -e
 # Environment files
 *.env
 *.env.*
+
+# metro cache
+.metro-cache/
+
+# Expo
+.expo/
+
+# yarn
+yarn.lock
+
+# package-lock.json
+package-lock.json
+
+# bun.lockb
+bun.lockb
+
+# bun.lock
+bun.lock
+
+# bun.lockb
+bun.lockb

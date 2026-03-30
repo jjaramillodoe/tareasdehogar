@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import FlagStripe from './FlagStripe';
 
 const { width, height } = Dimensions.get('window');
 
@@ -71,24 +72,26 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
         ]}
       >
         {/* Logo Container */}
+        <FlagStripe height={6} style={styles.flagStripe} />
+
         <View style={styles.logoContainer}>
           <View style={styles.logoCircle}>
-            <Ionicons name="home" size={60} color={Colors.white} />
+            <Ionicons name="people" size={58} color={Colors.white} />
           </View>
           <View style={styles.coinBadge}>
-            <Ionicons name="cash" size={24} color={Colors.white} />
+            <Ionicons name="wallet" size={22} color={Colors.onSecondary} />
           </View>
         </View>
 
         {/* App Name */}
-        <Text style={styles.title}>Tareas del Hogar</Text>
+        <Text style={styles.title}>HabitApp</Text>
         <Text style={styles.subtitle}>Recompensa el esfuerzo de tus hijos</Text>
 
-        {/* Animated Dots */}
+        {/* Tricolor dots */}
         <View style={styles.dotsContainer}>
-          <View style={[styles.dot, { backgroundColor: Colors.primary }]} />
-          <View style={[styles.dot, { backgroundColor: Colors.secondary }]} />
-          <View style={[styles.dot, { backgroundColor: Colors.accent }]} />
+          <View style={[styles.dot, { backgroundColor: Colors.flagYellow }]} />
+          <View style={[styles.dot, { backgroundColor: Colors.flagBlue }]} />
+          <View style={[styles.dot, { backgroundColor: Colors.flagRed }]} />
         </View>
       </Animated.View>
     </Animated.View>
@@ -115,27 +118,31 @@ const styles = StyleSheet.create({
   circleBlue: {
     width: width * 0.8,
     height: width * 0.8,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.flagBlue,
     top: -width * 0.2,
     left: -width * 0.2,
   },
   circleYellow: {
     width: width * 0.6,
     height: width * 0.6,
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.flagYellow,
     bottom: height * 0.1,
     right: -width * 0.2,
   },
   circleRed: {
     width: width * 0.5,
     height: width * 0.5,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.flagRed,
     bottom: -width * 0.1,
     left: -width * 0.1,
   },
   content: {
     alignItems: 'center',
     padding: 24,
+  },
+  flagStripe: {
+    width: 160,
+    marginBottom: 20,
   },
   logoContainer: {
     position: 'relative',
@@ -166,7 +173,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 4,
     borderColor: Colors.white,
-    shadowColor: Colors.secondary,
+    shadowColor: Colors.flagYellow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

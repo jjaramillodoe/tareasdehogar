@@ -1,50 +1,76 @@
-# Welcome to your Expo app 👋
+# HabitApp — Frontend (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+App móvil con [Expo](https://expo.dev) y [Expo Router](https://docs.expo.dev/router/introduction/). Ver también el [README principal](../README.md) del repositorio y la [guía de despliegue](../deploy.md).
 
-## Get started
+## Requisitos
 
-1. Install dependencies
+- Node.js 18+
+- Cuenta de desarrollo para builds de tienda (opcional; ver `deploy.md`)
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Puesta en marcha
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Opciones habituales: Expo Go, emulador Android, simulador iOS o build de desarrollo.
 
-## Learn more
+## Variables de entorno
 
-To learn more about developing your project with Expo, look at the following resources:
+Crea `frontend/.env` (no subas secretos al repositorio):
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```env
+# Origen del API FastAPI (sin barra final; el cliente añade /api)
+EXPO_PUBLIC_BACKEND_URL=http://localhost:8001
+```
 
-## Join the community
+En **producción**, usa la URL HTTPS del backend antes de generar el build (EAS); las variables `EXPO_PUBLIC_*` se incrustan en el bundle en el momento del build.
 
-Join our community of developers creating universal apps.
+## Estructura de rutas (`app/`)
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+| Grupo | Descripción |
+|--------|-------------|
+| `index.tsx` | Pantalla de bienvenida (no autenticado): accesos a registro, login, guía, hijo/a y enlaces legales. |
+| `(auth)/` | Login, registro y acceso como hijo/a (`child-login`). |
+| `(parent)/` | Tabs del flujo padre/tutor: inicio, tareas, metas, calendario, reportes, perfil, etc. |
+| `(child)/` | Tabs del flujo hijo/a: tareas, metas, pagos. |
+| `(public)/` | Pantallas **informativas y legales** (accesibles sin sesión y también desde el perfil). |
+
+### Pantallas públicas y legales (`(public)/`)
+
+Rutas pensadas para tiendas (privacidad, menores) y para ayuda al usuario:
+
+| Ruta | Contenido |
+|------|-----------|
+| `/(public)/how-it-works` | Guía **Cómo funciona la app** (padres e hijos: tareas, fotos, metas). |
+| `/(public)/privacy` | **Política de privacidad** (texto modelo). |
+| `/(public)/privacy-minors` | **Privacidad y menores** (tutores, datos de hijos, evidencias). |
+| `/(public)/terms` | **Términos de uso** (texto modelo). |
+
+**Componentes relacionados**
+
+- `src/components/PublicContentLayout.tsx` — cabecera con volver + scroll para estas pantallas.
+- `src/constants/legalStyles.ts` — estilos compartidos de títulos y párrafos en documentos legales.
+
+Los textos legales son **orientativos**; revísalos con asesoría jurídica antes de publicar en App Store o Google Play.
+
+**Dónde se enlaza**
+
+- Bienvenida: botón «Cómo funciona la app», «Soy hijo/a» y enlaces Privacidad / Menores / Términos.
+- Registro: aceptación con enlaces a Términos y Privacidad.
+- Login hijo/a: nota con enlace a Privacidad y menores.
+- Perfil (padre): sección **Información legal** con las cuatro entradas.
+
+## Scripts útiles
+
+| Comando | Descripción |
+|---------|-------------|
+| `npm start` / `npx expo start` | Servidor de desarrollo Metro. |
+| `npm run lint` | `expo lint`. |
+| `npm run android` / `npm run ios` | Abre en emulador/simulador según plataforma. |
+
+## Más información
+
+- [Documentación Expo](https://docs.expo.dev/)
+- Builds y tiendas: [`deploy.md`](../deploy.md) en la raíz del repositorio.

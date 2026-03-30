@@ -1,26 +1,31 @@
 {
   "expo": {
-    "name": "Tareas del Hogar",
-    "slug": "tareas-del-hogar",
+    "name": "HabitApp",
+    "slug": "habitapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tareasdelhogar",
+    "scheme": "habitapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Para tomar fotos de tareas completadas"
+        "NSCameraUsageDescription": "Para tomar fotos de tareas completadas",
+        "NSPhotoLibraryUsageDescription": "Para elegir una foto como evidencia de la tarea completada"
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#2563EB"
+        "backgroundColor": "#328DCC"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": []
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -35,9 +40,10 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#2563EB"
+          "backgroundColor": "#328DCC"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

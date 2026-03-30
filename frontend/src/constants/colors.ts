@@ -1,52 +1,58 @@
+/**
+ * Theme palette — amarillo, azul, rojo.
+ * Use `onSecondary` for text/icons on yellow (`secondary`) backgrounds.
+ */
 export const Colors = {
-  // Primary - Vibrant Blue
-  primary: '#2563EB',
-  primaryDark: '#1D4ED8',
-  primaryLight: '#3B82F6',
-  
-  // Secondary - Vibrant Yellow/Gold
-  secondary: '#F59E0B',
-  secondaryDark: '#D97706',
-  secondaryLight: '#FBBF24',
-  
-  // Accent - Vibrant Red
-  accent: '#EF4444',
-  accentDark: '#DC2626',
-  accentLight: '#F87171',
-  
-  // Success - Green
-  success: '#10B981',
-  successLight: '#34D399',
-  
-  // Warning - Orange
-  warning: '#F97316',
-  warningLight: '#FB923C',
-  
-  // Error - Red
-  error: '#EF4444',
-  errorLight: '#FCA5A5',
-  
-  // Backgrounds
-  background: '#F0F9FF',
+  // Palette reference
+  flagYellow: '#E1C84C',
+  flagBlue: '#328DCC',
+  flagRed: '#BC5F6A',
+
+  // Primary — azul (acciones principales, enlaces)
+  primary: '#328DCC',
+  primaryDark: '#2674AA',
+  primaryLight: '#58A6DB',
+
+  // Secondary — amarillo (dinero, logros, acentos cálidos)
+  secondary: '#E1C84C',
+  secondaryDark: '#C5AE42',
+  secondaryLight: '#F1E5A4',
+
+  // Accent — rojo (alertas, rechazar, badges urgentes)
+  accent: '#BC5F6A',
+  accentDark: '#9F4F59',
+  accentLight: '#D48791',
+
+  /** Texto sobre fondos amarillos (WCAG-friendly) */
+  onSecondary: '#1A2433',
+  onSecondaryMuted: '#2F4158',
+
+  success: '#0D9488',
+  successLight: '#2DD4BF',
+
+  warning: '#D97706',
+  warningLight: '#FBBF24',
+
+  error: '#BC5F6A',
+  errorLight: '#E2B2B9',
+
+  background: '#F0F4FB',
+  backgroundAlt: '#FFFBF0',
   surface: '#FFFFFF',
   surfaceAlt: '#F8FAFC',
-  
-  // Text
-  text: '#1E293B',
-  textSecondary: '#64748B',
+
+  text: '#0F172A',
+  textSecondary: '#475569',
   textLight: '#94A3B8',
-  
-  // Borders
+
   border: '#E2E8F0',
   borderDark: '#CBD5E1',
-  
-  // Others
+
   white: '#FFFFFF',
   black: '#000000',
-  overlay: 'rgba(0, 0, 0, 0.5)',
-  
-  // Gradient colors for splash
-  gradientStart: '#2563EB',
-  gradientMiddle: '#F59E0B',
-  gradientEnd: '#EF4444',
+  overlay: 'rgba(15, 23, 42, 0.45)',
+
+  gradientStart: '#328DCC',
+  gradientMiddle: '#E1C84C',
+  gradientEnd: '#BC5F6A',
 };

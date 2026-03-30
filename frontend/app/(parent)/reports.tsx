@@ -14,6 +14,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { statsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import { getChildAvatarColors } from '../../src/utils/childGender';
 
 const { width } = Dimensions.get('window');
 const CHART_WIDTH = width - 48;
@@ -26,6 +27,7 @@ interface DailyStat {
 interface ChildStat {
   child_id: string;
   name: string;
+  gender?: 'mujer' | 'hombre' | null;
   tasks_completed: number;
   amount_earned: number;
   balance: number;
@@ -110,7 +112,7 @@ export default function ReportsScreen() {
       >
         {/* Period Selector */}
         <View style={styles.periodSelector}>
-          {[7, 14, 30].map((days) => (
+          {[7, 14].map((days) => (
             <TouchableOpacity
               key={days}
               style={[
@@ -138,12 +140,12 @@ export default function ReportsScreen() {
             <Text style={styles.summaryValue}>{report?.total_tasks_completed || 0}</Text>
             <Text style={styles.summaryLabel}>Tareas Completadas</Text>
           </View>
-          <View style={[styles.summaryCard, { backgroundColor: Colors.secondary }]}>
-            <Ionicons name="cash" size={28} color={Colors.white} />
-            <Text style={styles.summaryValue}>
+          <View style={[styles.summaryCard, styles.summaryCardYellow]}>
+            <Ionicons name="wallet" size={28} color={Colors.onSecondary} />
+            <Text style={[styles.summaryValue, styles.summaryOnYellow]}>
               {family?.currency} {(report?.total_amount_paid || 0).toFixed(0)}
             </Text>
-            <Text style={styles.summaryLabel}>Total Pagado</Text>
+            <Text style={[styles.summaryLabel, styles.summaryLabelOnYellow]}>Total Pagado</Text>
           </View>
         </View>
 
@@ -180,8 +182,20 @@ export default function ReportsScreen() {
           {report?.children_stats.map((child) => (
             <View key={child.child_id} style={styles.childStatCard}>
               <View style={styles.childStatHeader}>
-                <View style={styles.childAvatar}>
-                  <Text style={styles.childInitial}>{child.name.charAt(0)}</Text>
+                <View
+                  style={[
+                    styles.childAvatar,
+                    { backgroundColor: getChildAvatarColors(child.gender).backgroundColor },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.childInitial,
+                      { color: getChildAvatarColors(child.gender).color },
+                    ]}
+                  >
+                    {child.name.charAt(0)}
+                  </Text>
                 </View>
                 <View style={styles.childInfo}>
                   <Text style={styles.childName}>{child.name}</Text>
@@ -197,7 +211,7 @@ export default function ReportsScreen() {
                   <Text style={styles.childStatLabel}>Tareas</Text>
                 </View>
                 <View style={styles.childStatItem}>
-                  <Text style={[styles.childStatValue, { color: Colors.secondary }]}>
+                  <Text style={[styles.childStatValue, { color: Colors.onSecondary }]}>
                     {family?.currency} {child.amount_earned.toFixed(0)}
                   </Text>
                   <Text style={styles.childStatLabel}>Ganado</Text>
@@ -277,17 +291,29 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
   },
+  summaryCardYellow: {
+    backgroundColor: Colors.secondary,
+    borderWidth: 1,
+    borderColor: Colors.secondaryDark,
+  },
   summaryValue: {
     fontSize: 24,
     fontWeight: 'bold',
     color: Colors.white,
     marginTop: 8,
   },
+  summaryOnYellow: {
+    color: Colors.onSecondary,
+  },
   summaryLabel: {
     fontSize: 12,
     color: Colors.white,
     opacity: 0.8,
     marginTop: 4,
+  },
+  summaryLabelOnYellow: {
+    color: Colors.onSecondaryMuted,
+    opacity: 1,
   },
   chartSection: {
     marginBottom: 24,
@@ -349,14 +375,12 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   childInitial: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: Colors.white,
   },
   childInfo: {
     marginLeft: 12,

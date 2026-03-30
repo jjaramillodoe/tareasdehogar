@@ -1,9 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/colors';
 import { notificationsAPI } from '../../src/services/api';
+
+function tabIcon(
+  focused: boolean,
+  outline: React.ComponentProps<typeof Ionicons>['name'],
+  solid: React.ComponentProps<typeof Ionicons>['name']
+) {
+  return (
+    <Ionicons
+      name={focused ? solid : outline}
+      size={focused ? 26 : 24}
+      color={focused ? Colors.primary : Colors.textSecondary}
+    />
+  );
+}
 
 export default function ParentLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -13,13 +27,13 @@ export default function ParentLayout() {
       try {
         const data = await notificationsAPI.getUnreadCount();
         setUnreadCount(data.unread_count);
-      } catch (error) {
+      } catch {
         // Silently fail
       }
     };
 
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000); // Check every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -30,20 +44,24 @@ export default function ParentLayout() {
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: Colors.white,
-          borderTopColor: Colors.border,
-          height: 65,
-          paddingBottom: 10,
-          paddingTop: 8,
-          shadowColor: Colors.black,
+          backgroundColor: Colors.surface,
+          borderTopWidth: 0,
+          height: Platform.OS === 'ios' ? 88 : 68,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+          paddingTop: 10,
+          shadowColor: Colors.primaryDark,
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.08,
-          shadowRadius: 8,
-          elevation: 8,
+          shadowRadius: 12,
+          elevation: 12,
         },
         tabBarLabelStyle: {
           fontSize: 10,
-          fontWeight: '600',
+          fontWeight: '700',
+          letterSpacing: 0.2,
+        },
+        tabBarItemStyle: {
+          paddingTop: 4,
         },
       }}
     >
@@ -51,54 +69,61 @@ export default function ParentLayout() {
         name="home"
         options={{
           title: 'Inicio',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'home-outline', 'home'),
         }}
       />
       <Tabs.Screen
         name="children"
         options={{
           title: 'Hijos',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'people-outline', 'people'),
         }}
       />
       <Tabs.Screen
         name="chores"
         options={{
           title: 'Tareas',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="list" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'clipboard-outline', 'clipboard'),
+        }}
+      />
+      <Tabs.Screen
+        name="calendar"
+        options={{
+          title: 'Calendario',
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'calendar-outline', 'calendar'),
         }}
       />
       <Tabs.Screen
         name="goals"
         options={{
           title: 'Metas',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flag" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'trophy-outline', 'trophy'),
         }}
       />
       <Tabs.Screen
         name="reports"
         options={{
           title: 'Reportes',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bar-chart" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'stats-chart-outline', 'stats-chart'),
         }}
       />
       <Tabs.Screen
         name="notifications"
         options={{
           title: 'Alertas',
-          tabBarIcon: ({ color, size }) => (
+          tabBarIcon: ({ focused }) => (
             <View>
-              <Ionicons name="notifications" size={size} color={color} />
+              <Ionicons
+                name={focused ? 'notifications' : 'notifications-outline'}
+                size={focused ? 26 : 24}
+                color={focused ? Colors.primary : Colors.textSecondary}
+              />
               {unreadCount > 0 && (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>
@@ -114,9 +139,14 @@ export default function ParentLayout() {
         name="profile"
         options={{
           title: 'Perfil',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
-          ),
+          tabBarIcon: ({ focused }) =>
+            tabIcon(focused, 'person-circle-outline', 'person-circle'),
+        }}
+      />
+      <Tabs.Screen
+        name="family-badges"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
@@ -135,6 +165,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: Colors.surface,
   },
   badgeText: {
     color: Colors.white,

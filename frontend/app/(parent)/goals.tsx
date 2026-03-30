@@ -13,13 +13,15 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
-import { goalsAPI, childrenAPI } from '../../src/services/api';
+import { goalsAPI, childrenAPI, savingsGoalsAPI, SavingsGoalDTO } from '../../src/services/api';
+import { ParentSavingsGoalsSection } from '../../src/components/SavingsGoalsSections';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Child {
   id: string;
   name: string;
+  balance?: number;
 }
 
 interface Goal {
@@ -32,34 +34,226 @@ interface Goal {
   completed_tasks: number;
   is_completed: boolean;
   bonus_paid: boolean;
+  goal_period?: string;
 }
+
+/** Plantillas de metas y bonos (montos orientativos; ajusta según tu familia) */
+const predefinedGoals = [
+  {
+    title: 'Primera meta fácil',
+    description: 'Completa 2 tareas para ganar confianza',
+    target_tasks: 2,
+    bonus_amount: 2,
+    icon: 'flag-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Mini meta semanal',
+    description: 'Tres tareas bien hechas esta semana',
+    target_tasks: 3,
+    bonus_amount: 4,
+    icon: 'ribbon-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Semana productiva',
+    description: 'Cinco tareas completadas en la semana',
+    target_tasks: 5,
+    bonus_amount: 6,
+    icon: 'trophy-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Súper semana',
+    description: 'Diez tareas: reto para quien ya tiene experiencia',
+    target_tasks: 10,
+    bonus_amount: 12,
+    icon: 'star-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Reto quince',
+    description: 'Quince tareas en la semana',
+    target_tasks: 15,
+    bonus_amount: 18,
+    icon: 'flash-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Estrella del hogar',
+    description: 'Ocho tareas: ayuda en casa y responsabilidad',
+    target_tasks: 8,
+    bonus_amount: 10,
+    icon: 'home-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Lector de la semana',
+    description: 'Cinco tareas vinculadas a lectura o estudio',
+    target_tasks: 5,
+    bonus_amount: 6,
+    icon: 'book-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Deberes al día',
+    description: 'Cinco tareas escolares o de tarea completadas',
+    target_tasks: 5,
+    bonus_amount: 7,
+    icon: 'school-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Fin de semana ordenado',
+    description: 'Cuatro tareas entre sábado y domingo',
+    target_tasks: 4,
+    bonus_amount: 5,
+    icon: 'calendar-outline',
+    goal_period: 'personalizado' as const,
+  },
+  {
+    title: 'Ayudante de cocina',
+    description: 'Tres tareas en cocina o comedor',
+    target_tasks: 3,
+    bonus_amount: 4,
+    icon: 'restaurant-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Campeón del reciclaje',
+    description: 'Tres tareas de basura, reciclaje o patio',
+    target_tasks: 3,
+    bonus_amount: 4,
+    icon: 'leaf-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Cuidador de mascotas',
+    description: 'Cuatro tareas con las mascotas',
+    target_tasks: 4,
+    bonus_amount: 5,
+    icon: 'paw-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Una tarea al día',
+    description: 'Siete tareas en la semana (una por día)',
+    target_tasks: 7,
+    bonus_amount: 8,
+    icon: 'sunny-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Medalla bronce',
+    description: 'Seis tareas para la primera medalla',
+    target_tasks: 6,
+    bonus_amount: 7,
+    icon: 'medal-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Medalla plata',
+    description: 'Doce tareas: constancia',
+    target_tasks: 12,
+    bonus_amount: 14,
+    icon: 'medal-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Medalla oro',
+    description: 'Veinte tareas: el gran reto',
+    target_tasks: 20,
+    bonus_amount: 25,
+    icon: 'medal-outline',
+    goal_period: 'semanal' as const,
+  },
+  {
+    title: 'Plan mensual',
+    description: 'Veinte tareas en el mes (ritmo suave)',
+    target_tasks: 20,
+    bonus_amount: 22,
+    icon: 'calendar-number-outline',
+    goal_period: 'personalizado' as const,
+  },
+  {
+    title: 'Gran reto mensual',
+    description: 'Treinta tareas en el mes',
+    target_tasks: 30,
+    bonus_amount: 35,
+    icon: 'rocket-outline',
+    goal_period: 'personalizado' as const,
+  },
+];
 
 export default function GoalsScreen() {
   const { family } = useAuthStore();
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoalDTO[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [goalTab, setGoalTab] = useState<'tasks' | 'savings'>('tasks');
   const [showModal, setShowModal] = useState(false);
+  const [showPredefinedModal, setShowPredefinedModal] = useState(false);
   const [selectedChildId, setSelectedChildId] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     target_tasks: '',
     bonus_amount: '',
+    goal_period: 'semanal' as 'semanal' | 'personalizado',
   });
   const [saving, setSaving] = useState(false);
 
+  const openNewGoalOptions = () => {
+    setFormData({
+      title: '',
+      description: '',
+      target_tasks: '',
+      bonus_amount: '',
+      goal_period: 'semanal',
+    });
+    setShowPredefinedModal(true);
+  };
+
+  const selectPredefinedGoal = (preset: (typeof predefinedGoals)[0]) => {
+    setFormData({
+      title: preset.title,
+      description: preset.description,
+      target_tasks: String(preset.target_tasks),
+      bonus_amount: String(preset.bonus_amount),
+      goal_period: preset.goal_period,
+    });
+    setShowPredefinedModal(false);
+    setShowModal(true);
+  };
+
   const loadData = async () => {
     try {
-      const [goalsData, childrenData] = await Promise.all([
+      const [goRes, chRes, sgRes] = await Promise.allSettled([
         goalsAPI.getAll(),
         childrenAPI.getAll(),
+        savingsGoalsAPI.getAll(),
       ]);
-      setGoals(goalsData);
-      setChildren(childrenData);
-      if (childrenData.length > 0 && !selectedChildId) {
-        setSelectedChildId(childrenData[0].id);
+      if (goRes.status === 'fulfilled') {
+        setGoals(goRes.value);
+      } else {
+        console.error('Error loading task goals:', goRes.reason);
+      }
+      if (chRes.status === 'fulfilled') {
+        const childrenData = chRes.value;
+        setChildren(childrenData);
+        setSelectedChildId((prev) => {
+          if (childrenData.length > 0 && !prev) return childrenData[0].id;
+          return prev;
+        });
+      } else {
+        console.error('Error loading children:', chRes.reason);
+      }
+      if (sgRes.status === 'fulfilled') {
+        setSavingsGoals(sgRes.value);
+      } else {
+        setSavingsGoals([]);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -102,11 +296,20 @@ export default function GoalsScreen() {
         formData.description.trim() || undefined,
         target,
         bonus,
-        selectedChildId
+        selectedChildId,
+        undefined,
+        undefined,
+        formData.goal_period
       );
       Alert.alert('Éxito', 'Meta creada correctamente');
       setShowModal(false);
-      setFormData({ title: '', description: '', target_tasks: '', bonus_amount: '' });
+      setFormData({
+        title: '',
+        description: '',
+        target_tasks: '',
+        bonus_amount: '',
+        goal_period: 'semanal',
+      });
       loadData();
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Error al crear la meta';
@@ -179,15 +382,51 @@ export default function GoalsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Metas y Bonos</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setShowModal(true)}
-        >
-          <Ionicons name="add" size={24} color={Colors.white} />
-        </TouchableOpacity>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>Metas y Bonos</Text>
+          {goalTab === 'tasks' ? (
+            <TouchableOpacity style={styles.addButton} onPress={openNewGoalOptions}>
+              <Ionicons name="add" size={24} color={Colors.white} />
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 44 }} />
+          )}
+        </View>
+        <View style={styles.segment}>
+          <TouchableOpacity
+            style={[styles.segmentChip, goalTab === 'tasks' && styles.segmentChipActive]}
+            onPress={() => setGoalTab('tasks')}
+          >
+            <Text style={[styles.segmentText, goalTab === 'tasks' && styles.segmentTextActive]}>Por tareas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.segmentChip, goalTab === 'savings' && styles.segmentChipActive]}
+            onPress={() => setGoalTab('savings')}
+          >
+            <Text style={[styles.segmentText, goalTab === 'savings' && styles.segmentTextActive]}>Ahorro</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
+      {goalTab === 'savings' ? (
+        <View style={styles.savingsWrap}>
+          <ParentSavingsGoalsSection
+            savingsGoals={savingsGoals}
+            childrenList={children}
+            currency={family?.currency ?? ''}
+            onReload={async () => {
+              setRefreshing(true);
+              await loadData();
+            }}
+            onChildBalanceUpdated={({ childId, balance }) => {
+              setChildren((prev) =>
+                prev.map((c) => (c.id === childId ? { ...c, balance } : c))
+              );
+            }}
+            refreshing={refreshing}
+          />
+        </View>
+      ) : (
       <ScrollView
         style={styles.content}
         refreshControl={
@@ -302,6 +541,7 @@ export default function GoalsScreen() {
           </>
         )}
       </ScrollView>
+      )}
 
       {/* Create Goal Modal */}
       <Modal
@@ -363,6 +603,44 @@ export default function GoalsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Tipo de meta</Text>
+              <View style={styles.periodRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.periodChip,
+                    formData.goal_period === 'semanal' && styles.periodChipActive,
+                  ]}
+                  onPress={() => setFormData({ ...formData, goal_period: 'semanal' })}
+                >
+                  <Text
+                    style={[
+                      styles.periodChipText,
+                      formData.goal_period === 'semanal' && styles.periodChipTextActive,
+                    ]}
+                  >
+                    Semanal
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.periodChip,
+                    formData.goal_period === 'personalizado' && styles.periodChipActive,
+                  ]}
+                  onPress={() => setFormData({ ...formData, goal_period: 'personalizado' })}
+                >
+                  <Text
+                    style={[
+                      styles.periodChipText,
+                      formData.goal_period === 'personalizado' && styles.periodChipTextActive,
+                    ]}
+                  >
+                    Personalizado
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Asignar a *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.childSelector}>
@@ -411,6 +689,102 @@ export default function GoalsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Metas predefinidas */}
+      <Modal
+        visible={showPredefinedModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowPredefinedModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.predefinedModalContent}>
+            <View style={styles.predefinedModalHeader}>
+              <Text style={styles.predefinedHeaderTitle}>Nueva meta</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowPredefinedModal(false)}
+              >
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.predefinedSubtitle}>
+              Elige una plantilla o crea una meta personalizada
+            </Text>
+
+            <TouchableOpacity
+              style={styles.customTaskButton}
+              onPress={() => {
+                setShowPredefinedModal(false);
+                setShowModal(true);
+              }}
+            >
+              <View style={styles.customTaskIcon}>
+                <Ionicons name="create-outline" size={24} color={Colors.white} />
+              </View>
+              <View style={styles.customTaskInfo}>
+                <Text style={styles.customTaskTitle}>Meta personalizada</Text>
+                <Text style={styles.customTaskDesc}>Define título, tareas objetivo y bono</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+            </TouchableOpacity>
+
+            <Text style={styles.predefinedSectionTitle}>Metas y bonos sugeridos</Text>
+
+            <ScrollView style={styles.predefinedList} showsVerticalScrollIndicator={false}>
+              {predefinedGoals.map((preset, index) => (
+                <TouchableOpacity
+                  key={`${preset.title}-${index}`}
+                  style={styles.predefinedItem}
+                  onPress={() => selectPredefinedGoal(preset)}
+                >
+                  <View
+                    style={[
+                      styles.predefinedIcon,
+                      {
+                        backgroundColor:
+                          index % 3 === 0
+                            ? Colors.primary + '20'
+                            : index % 3 === 1
+                              ? Colors.secondary + '20'
+                              : Colors.accent + '20',
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={preset.icon as React.ComponentProps<typeof Ionicons>['name']}
+                      size={22}
+                      color={
+                        index % 3 === 0
+                          ? Colors.primary
+                          : index % 3 === 1
+                            ? Colors.secondary
+                            : Colors.accent
+                      }
+                    />
+                  </View>
+                  <View style={styles.predefinedInfo}>
+                    <Text style={styles.predefinedTitle}>{preset.title}</Text>
+                    <Text style={styles.predefinedDesc} numberOfLines={2}>
+                      {preset.description}
+                    </Text>
+                    <Text style={styles.predefinedPeriod}>
+                      {preset.goal_period === 'semanal' ? 'Semanal' : 'Personalizado'}
+                    </Text>
+                  </View>
+                  <View style={styles.predefinedGoalMeta}>
+                    <Text style={styles.predefinedGoalTasks}>{preset.target_tasks} tareas</Text>
+                    <Text style={styles.predefinedGoalBonus}>
+                      {family?.currency} {preset.bonus_amount}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -427,12 +801,44 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 20,
     paddingTop: 60,
     backgroundColor: Colors.surface,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  segment: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  segmentChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  segmentChipActive: {
+    backgroundColor: Colors.primary + '22',
+    borderColor: Colors.primary,
+  },
+  segmentText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  segmentTextActive: {
+    color: Colors.primary,
+  },
+  savingsWrap: {
+    flex: 1,
+    padding: 16,
   },
   headerTitle: {
     fontSize: 24,
@@ -566,7 +972,7 @@ const styles = StyleSheet.create({
   bonusText: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.secondary,
+    color: Colors.primary,
   },
   paidBadge: {
     backgroundColor: Colors.success + '20',
@@ -588,7 +994,7 @@ const styles = StyleSheet.create({
   payButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.white,
+    color: Colors.onSecondary,
   },
   modalOverlay: {
     flex: 1,
@@ -614,6 +1020,30 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  periodRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  periodChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  periodChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  periodChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  periodChipTextActive: {
+    color: Colors.white,
   },
   inputLabel: {
     fontSize: 14,
@@ -689,5 +1119,127 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  predefinedModalContent: {
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  predefinedModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  predefinedHeaderTitle: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  closeButton: {
+    padding: 8,
+  },
+  predefinedSubtitle: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginBottom: 20,
+  },
+  customTaskButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  customTaskIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customTaskInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  customTaskTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  customTaskDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  predefinedSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  predefinedList: {
+    maxHeight: 400,
+  },
+  predefinedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  predefinedIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  predefinedInfo: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  predefinedTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  predefinedDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  predefinedPeriod: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginTop: 4,
+    textTransform: 'capitalize',
+  },
+  predefinedGoalMeta: {
+    alignItems: 'flex-end',
+  },
+  predefinedGoalTasks: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  predefinedGoalBonus: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.secondary,
+    marginTop: 2,
   },
 });

@@ -1,21 +1,27 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../src/store/authStore';
 import { Colors } from '../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import FlagStripe from '../src/components/FlagStripe';
 
 const { width } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const router = useRouter();
-  const { user, isInitialized } = useAuthStore();
+  const { user, isInitialized, isChildSession, selectedChild } = useAuthStore();
 
   useEffect(() => {
-    if (isInitialized && user) {
+    if (!isInitialized) return;
+    if (isChildSession && selectedChild) {
+      router.replace('/(child)/tasks');
+      return;
+    }
+    if (user) {
       router.replace('/(parent)/home');
     }
-  }, [isInitialized, user]);
+  }, [isInitialized, user, isChildSession, selectedChild]);
 
   return (
     <View style={styles.container}>
@@ -26,18 +32,23 @@ export default function WelcomeScreen() {
         <View style={[styles.decorCircle, styles.decorRed]} />
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header */}
         <View style={styles.header}>
+          <FlagStripe height={5} style={styles.flagStripe} />
           <View style={styles.logoContainer}>
             <View style={styles.logoCircle}>
-              <Ionicons name="home" size={50} color={Colors.white} />
+              <Ionicons name="people" size={48} color={Colors.white} />
             </View>
             <View style={styles.coinBadge}>
-              <Ionicons name="cash" size={18} color={Colors.white} />
+              <Ionicons name="wallet" size={17} color={Colors.onSecondary} />
             </View>
           </View>
-          <Text style={styles.title}>Tareas del Hogar</Text>
+          <Text style={styles.title}>HabitApp</Text>
           <Text style={styles.subtitle}>
             Gestiona las tareas de tus hijos y recompénsalos por su esfuerzo
           </Text>
@@ -46,8 +57,8 @@ export default function WelcomeScreen() {
         {/* Features */}
         <View style={styles.features}>
           <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.primary + '20' }]}>
-              <Ionicons name="list" size={24} color={Colors.primary} />
+            <View style={[styles.featureIcon, { backgroundColor: Colors.primary + '22' }]}>
+              <Ionicons name="clipboard-outline" size={24} color={Colors.primary} />
             </View>
             <View style={styles.featureText}>
               <Text style={styles.featureTitle}>Crea tareas</Text>
@@ -56,8 +67,8 @@ export default function WelcomeScreen() {
           </View>
 
           <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.secondary + '20' }]}>
-              <Ionicons name="cash" size={24} color={Colors.secondary} />
+            <View style={[styles.featureIcon, { backgroundColor: Colors.secondary + '33' }]}>
+              <Ionicons name="wallet-outline" size={24} color={Colors.onSecondary} />
             </View>
             <View style={styles.featureText}>
               <Text style={styles.featureTitle}>Define pagos</Text>
@@ -66,8 +77,8 @@ export default function WelcomeScreen() {
           </View>
 
           <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.accent + '20' }]}>
-              <Ionicons name="checkmark-circle" size={24} color={Colors.accent} />
+            <View style={[styles.featureIcon, { backgroundColor: Colors.accent + '22' }]}>
+              <Ionicons name="checkmark-done-circle" size={24} color={Colors.accent} />
             </View>
             <View style={styles.featureText}>
               <Text style={styles.featureTitle}>Aprueba</Text>
@@ -76,13 +87,23 @@ export default function WelcomeScreen() {
           </View>
         </View>
 
+        <TouchableOpacity
+          style={styles.guideButton}
+          onPress={() => router.push('/(public)/how-it-works')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="book-outline" size={22} color={Colors.primary} />
+          <Text style={styles.guideButtonText}>Cómo funciona la app</Text>
+          <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
+        </TouchableOpacity>
+
         {/* Buttons */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={() => router.push('/(auth)/register')}
           >
-            <Ionicons name="person-add" size={20} color={Colors.white} />
+            <Ionicons name="person-add-outline" size={22} color={Colors.white} />
             <Text style={styles.primaryButtonText}>Crear Cuenta</Text>
           </TouchableOpacity>
 
@@ -90,20 +111,43 @@ export default function WelcomeScreen() {
             style={styles.secondaryButton}
             onPress={() => router.push('/(auth)/login')}
           >
-            <Ionicons name="log-in" size={20} color={Colors.primary} />
+            <Ionicons name="log-in-outline" size={22} color={Colors.primary} />
             <Text style={styles.secondaryButtonText}>Iniciar Sesión</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.childEntryButton}
+            onPress={() => router.push('/(auth)/child-login')}
+          >
+            <Ionicons name="happy-outline" size={22} color={Colors.black} />
+            <Text style={[styles.childEntryButtonText, { color: Colors.black }]}>Soy hijo/a</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Legal */}
+        <View style={styles.legalRow}>
+          <TouchableOpacity onPress={() => router.push('/(public)/privacy')}>
+            <Text style={styles.legalLink}>Privacidad</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalSep}>·</Text>
+          <TouchableOpacity onPress={() => router.push('/(public)/privacy-minors')}>
+            <Text style={styles.legalLink}>Menores</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalSep}>·</Text>
+          <TouchableOpacity onPress={() => router.push('/(public)/terms')}>
+            <Text style={styles.legalLink}>Términos</Text>
           </TouchableOpacity>
         </View>
 
         {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.footerDots}>
-            <View style={[styles.footerDot, { backgroundColor: Colors.primary }]} />
-            <View style={[styles.footerDot, { backgroundColor: Colors.secondary }]} />
-            <View style={[styles.footerDot, { backgroundColor: Colors.accent }]} />
+            <View style={[styles.footerDot, { backgroundColor: Colors.flagYellow }]} />
+            <View style={[styles.footerDot, { backgroundColor: Colors.flagBlue }]} />
+            <View style={[styles.footerDot, { backgroundColor: Colors.flagRed }]} />
           </View>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -126,33 +170,60 @@ const styles = StyleSheet.create({
   decorBlue: {
     width: width * 0.7,
     height: width * 0.7,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.flagBlue,
     top: -width * 0.2,
     right: -width * 0.2,
   },
   decorYellow: {
     width: width * 0.5,
     height: width * 0.5,
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.flagYellow,
     top: '40%',
     left: -width * 0.2,
   },
   decorRed: {
     width: width * 0.4,
     height: width * 0.4,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.flagRed,
     bottom: -width * 0.1,
     right: -width * 0.1,
   },
-  content: {
+  scroll: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: 60,
-    paddingBottom: 24,
+    paddingBottom: 32,
+  },
+  guideButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: Colors.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: Colors.primary + '44',
+  },
+  guideButtonText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
   },
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  flagStripe: {
+    width: '72%',
+    maxWidth: 280,
+    marginBottom: 16,
   },
   logoContainer: {
     position: 'relative',
@@ -278,11 +349,46 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
   },
-  footer: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  childEntryButton: {
+    backgroundColor: Colors.secondary,
+    paddingVertical: 16,
+    borderRadius: 14,
     alignItems: 'center',
-    paddingBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 2,
+    borderColor: Colors.secondaryDark,
+  },
+  childEntryButtonText: {
+    color: Colors.secondary,
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 16,
+    gap: 4,
+  },
+  legalLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginHorizontal: 2,
+  },
+  footer: {
+    alignItems: 'center',
+    paddingBottom: 12,
+    paddingTop: 8,
   },
   footerDots: {
     flexDirection: 'row',

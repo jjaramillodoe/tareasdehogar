@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend API Tests for Tareas del Hogar (House Chores) System
+Comprehensive Backend API Tests for HabitApp (House Chores) System
 Testing authentication, family management, children CRUD, chores workflow, and payments
 """
 

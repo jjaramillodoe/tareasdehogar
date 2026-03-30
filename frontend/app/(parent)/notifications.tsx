@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { notificationsAPI } from '../../src/services/api';
@@ -62,6 +63,8 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const loadNotifications = async () => {
     try {
@@ -92,6 +95,12 @@ export default function NotificationsScreen() {
     }
   };
 
+  const toggleSelected = (notificationId: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(notificationId) ? prev.filter((x) => x !== notificationId) : [...prev, notificationId]
+    );
+  };
+
   const handleMarkAllRead = async () => {
     try {
       await notificationsAPI.markAllRead();
@@ -99,6 +108,51 @@ export default function NotificationsScreen() {
     } catch (error) {
       console.error('Error marking all read:', error);
     }
+  };
+
+  const handleDeleteAll = async () => {
+    Alert.alert('Eliminar todas', '¿Seguro que quieres eliminar todas las notificaciones?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await notificationsAPI.deleteAll();
+            setNotifications([]);
+            setSelectionMode(false);
+            setSelectedIds([]);
+          } catch (error) {
+            console.error('Error deleting all notifications:', error);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    Alert.alert(
+      'Eliminar seleccionadas',
+      `¿Seguro que quieres eliminar ${selectedIds.length} notificación(es)?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await notificationsAPI.deleteMany(selectedIds);
+              setNotifications((prev) => prev.filter((n) => !selectedIds.includes(n.id)));
+              setSelectedIds([]);
+              setSelectionMode(false);
+            } catch (error) {
+              console.error('Error deleting selected notifications:', error);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
@@ -120,10 +174,42 @@ export default function NotificationsScreen() {
             <Text style={styles.unreadCount}>{unreadCount} sin leer</Text>
           )}
         </View>
+      </View>
+      <View style={styles.actionsRow}>
+        {!selectionMode ? (
+          <TouchableOpacity style={styles.ghostButton} onPress={() => setSelectionMode(true)}>
+            <Text style={styles.ghostButtonText}>Seleccionar</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.ghostButton}
+            onPress={() => {
+              setSelectionMode(false);
+              setSelectedIds([]);
+            }}
+          >
+            <Text style={styles.ghostButtonText}>Cancelar</Text>
+          </TouchableOpacity>
+        )}
         {unreadCount > 0 && (
           <TouchableOpacity style={styles.markAllButton} onPress={handleMarkAllRead}>
-            <Text style={styles.markAllButtonText}>Marcar todas</Text>
+            <Text style={styles.markAllButtonText}>Marcar leídas</Text>
           </TouchableOpacity>
+        )}
+        {selectionMode ? (
+          <TouchableOpacity
+            style={[styles.deleteButton, selectedIds.length === 0 && styles.buttonDisabled]}
+            onPress={handleDeleteSelected}
+            disabled={selectedIds.length === 0}
+          >
+            <Text style={styles.deleteButtonText}>Eliminar ({selectedIds.length})</Text>
+          </TouchableOpacity>
+        ) : (
+          notifications.length > 0 && (
+            <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAll}>
+              <Text style={styles.deleteButtonText}>Eliminar todas</Text>
+            </TouchableOpacity>
+          )
         )}
       </View>
 
@@ -154,8 +240,21 @@ export default function NotificationsScreen() {
                 style={[
                   styles.notificationCard,
                   !notification.is_read && styles.unreadCard,
+                  selectionMode && selectedIds.includes(notification.id) && styles.selectedCard,
                 ]}
-                onPress={() => !notification.is_read && handleMarkRead(notification.id)}
+                onPress={() => {
+                  if (selectionMode) {
+                    toggleSelected(notification.id);
+                    return;
+                  }
+                  if (!notification.is_read) handleMarkRead(notification.id);
+                }}
+                onLongPress={() => {
+                  if (!selectionMode) {
+                    setSelectionMode(true);
+                    setSelectedIds([notification.id]);
+                  }
+                }}
               >
                 <View
                   style={[
@@ -172,7 +271,15 @@ export default function NotificationsScreen() {
                     {formatDate(notification.created_at)}
                   </Text>
                 </View>
-                {!notification.is_read && <View style={styles.unreadDot} />}
+                {selectionMode ? (
+                  <Ionicons
+                    name={selectedIds.includes(notification.id) ? 'checkbox' : 'square-outline'}
+                    size={22}
+                    color={selectedIds.includes(notification.id) ? Colors.primary : Colors.textLight}
+                  />
+                ) : (
+                  !notification.is_read && <View style={styles.unreadDot} />
+                )}
               </TouchableOpacity>
             );
           })
@@ -201,6 +308,17 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: Colors.surface,
   },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -221,6 +339,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: Colors.primary,
+  },
+  ghostButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  ghostButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+  },
+  deleteButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.accent + '1f',
+  },
+  deleteButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.accentDark,
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   content: {
     flex: 1,
@@ -253,6 +398,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary + '08',
     borderWidth: 1,
     borderColor: Colors.primary + '20',
+  },
+  selectedCard: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
   },
   notificationIcon: {
     width: 44,
