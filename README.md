@@ -94,6 +94,8 @@ JWT_SECRET="tu-clave-secreta-muy-larga-y-segura-aqui"
 
 Opcional: `CORS_ORIGINS` si el servidor lo usa.
 
+**Restablecimiento de contraseña:** el flujo *olvidé mi contraseña* usa un webhook HTTP para enviar el correo (y variables como `PASSWORD_RESET_EMAIL_WEBHOOK_URL`, `PASSWORD_RESET_LINK_BASE`). En local, sin webhook, no se envía email. Configuración completa en **[`deploy.md`](deploy.md)** (sección **2.1**).
+
 ### Frontend — variables de entorno
 
 Crear `frontend/.env`:
