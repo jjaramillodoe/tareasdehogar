@@ -102,3 +102,6 @@ bun.lock
 
 # bun.lockb
 bun.lockb
+
+# emergent
+.emergent/
