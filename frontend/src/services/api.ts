@@ -94,6 +94,17 @@ export const authAPI = {
     const response = await api.post(`/auth/sessions/${encodeURIComponent(sessionId)}/revoke`);
     return response.data as { ok: boolean };
   },
+  forgotPassword: async (email: string) => {
+    const response = await api.post('/auth/forgot-password', { email: email.trim() });
+    return response.data as { message: string };
+  },
+  resetPassword: async (token: string, new_password: string) => {
+    const response = await api.post('/auth/reset-password', {
+      token: token.trim(),
+      new_password,
+    });
+    return response.data as { message: string };
+  },
 };
 
 // Family API

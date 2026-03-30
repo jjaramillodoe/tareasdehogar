@@ -1,9 +1,12 @@
+import hashlib
+import logging
+import secrets
 import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.config import db
+from app.config import PASSWORD_RESET_TOKEN_TTL_MINUTES, db
 from app.deps import (
     create_access_token,
     create_child_access_token,
@@ -18,15 +21,24 @@ from app.models import (
     ChildResponse,
     ChildStandaloneLogin,
     ChildTokenResponse,
+    ForgotPasswordRequest,
+    GenericStatusMessage,
     PasswordChange,
+    ResetPasswordRequest,
     TokenResponse,
     UserCreate,
     UserLogin,
     UserResponse,
 )
 from app.services.audit import log_audit_event
+from app.services.password_reset_email import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
+
+
+def _hash_password_reset_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _normalize_device_name(raw: str | None, fallback: str | None = None) -> str:
@@ -99,6 +111,99 @@ async def register_user(user_data: UserCreate, request: Request):
             created_at=user["created_at"],
         ),
     )
+
+
+@router.post("/forgot-password", response_model=GenericStatusMessage)
+async def forgot_password(data: ForgotPasswordRequest):
+    """
+    Solicita restablecimiento de contraseña. Siempre responde el mismo mensaje
+    para no revelar si el correo existe.
+    """
+    msg_ok = GenericStatusMessage(
+        message="Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña."
+    )
+    user = await db.users.find_one({"email": data.email})
+    if not user:
+        return msg_ok
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _hash_password_reset_token(raw_token)
+    token_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    expires_at = now + timedelta(minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES)
+
+    await db.password_reset_tokens.delete_many({"user_id": user["id"]})
+    await db.password_reset_tokens.insert_one(
+        {
+            "id": token_id,
+            "user_id": user["id"],
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+            "created_at": now,
+        }
+    )
+
+    try:
+        await send_password_reset_email(
+            to_email=user["email"],
+            user_name=str(user.get("name") or ""),
+            reset_token=raw_token,
+        )
+    except Exception as e:
+        logger.exception("password reset email webhook failed: %s", e)
+
+    await log_audit_event(
+        family_id=user.get("family_id"),
+        actor_user_id=None,
+        action="parent_password_reset_requested",
+        target_type="user",
+        target_id=user["id"],
+    )
+    return msg_ok
+
+
+@router.post("/reset-password", response_model=GenericStatusMessage)
+async def reset_password(data: ResetPasswordRequest):
+    """Restablece la contraseña con el token recibido por correo."""
+    raw = data.token.strip()
+    token_hash = _hash_password_reset_token(raw)
+    row = await db.password_reset_tokens.find_one({"token_hash": token_hash})
+    if not row:
+        raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
+
+    if row.get("used_at"):
+        raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
+
+    expires_at = row.get("expires_at")
+    if expires_at and expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
+
+    user = await db.users.find_one({"id": row["user_id"]})
+    if not user:
+        raise HTTPException(status_code=400, detail="Enlace inválido o expirado")
+
+    next_tv = int(user.get("token_version") or 0) + 1
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(data.new_password), "token_version": next_tv}},
+    )
+    await db.password_reset_tokens.update_one(
+        {"id": row["id"]},
+        {"$set": {"used_at": datetime.utcnow()}},
+    )
+    await db.auth_sessions.update_many(
+        {"user_id": user["id"], "revoked_at": {"$exists": False}},
+        {"$set": {"revoked_at": datetime.utcnow(), "revoked_reason": "password_reset"}},
+    )
+
+    await log_audit_event(
+        family_id=user.get("family_id"),
+        actor_user_id=user["id"],
+        action="parent_password_reset_completed",
+        target_type="user",
+        target_id=user["id"],
+    )
+    return GenericStatusMessage(message="Tu contraseña fue actualizada. Ya puedes iniciar sesión.")
 
 
 @router.post("/login", response_model=TokenResponse)

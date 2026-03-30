@@ -66,6 +66,38 @@ JWT_SECRET="cambia-esto-por-un-secreto-largo-y-unico"
 
 **JWT y sesiones:** Si cambias `JWT_SECRET` en producción, **todas** las sesiones existentes dejarán de ser válidas (los usuarios deberán iniciar sesión de nuevo). El backend también usa `token_version` en usuarios y `session_version` en hijos para invalidar sesiones tras cambio de contraseña/PIN o “cerrar todas las sesiones”; no requiere variables extra.
 
+### 2.1 Olvidé mi contraseña (webhook de correo y enlace en la app)
+
+El flujo **forgot / reset** envía el enlace por HTTP a **tu** servicio de correo (Resend, SendGrid, API interna, etc.). Sin webhook configurado, el backend **no** envía correo (solo registra una advertencia en logs); útil en desarrollo local.
+
+Añade en el `.env` del servidor (o en el panel del PaaS):
+
+```env
+# Opcional: POST JSON con { event, to_email, user_name, reset_url } — ver abajo
+PASSWORD_RESET_EMAIL_WEBHOOK_URL="https://tu-servicio.com/enviar-correo"
+
+# Opcional: si tu API lo exige, se envía como Authorization: Bearer <valor>
+PASSWORD_RESET_EMAIL_WEBHOOK_SECRET=""
+
+# URL que abrirá la app al pulsar el enlace del correo (deep link). Por defecto: habitapp://reset-password?token=...
+# Si el valor ya incluye "?", el token se añade con "&token=..."
+PASSWORD_RESET_LINK_BASE="habitapp://reset-password"
+
+# Tiempo de vida del token de un solo uso (minutos). Por defecto: 60
+PASSWORD_RESET_TOKEN_TTL_MINUTES="60"
+```
+
+**Cuerpo del POST al webhook** (JSON):
+
+| Campo | Descripción |
+|--------|-------------|
+| `event` | Siempre `"password_reset"`. |
+| `to_email` | Correo del usuario. |
+| `user_name` | Nombre mostrado en la app. |
+| `reset_url` | Enlace listo para usar (incluye el `token` en query). Ej.: `habitapp://reset-password?token=...` |
+
+En la app Expo, la pantalla de restablecimiento lee el parámetro `token` de la URL; el esquema `habitapp` está definido en `app.json`.
+
 ---
 
 ## 3. Comando de arranque en producción
@@ -93,6 +125,7 @@ MongoDB crea colecciones **bajo demanda**. No hace falta migración SQL; al desp
 | Colección | Uso |
 |-----------|-----|
 | `users`, `families`, `children` | Cuentas y familia |
+| `password_reset_tokens` | Tokens de un solo uso para “olvidé mi contraseña” (hash + caducidad) |
 | `auth_sessions` | Sesiones de padre/tutor (listado y cierre por dispositivo) |
 | `audit_logs` | Bitácora de acciones sensibles |
 | `chores`, `payments`, `goals`, `savings_goals`, `withdrawals`, … | Actividad habitual |

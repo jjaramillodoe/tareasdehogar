@@ -23,6 +23,19 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=4, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=10, max_length=512)
+    new_password: str = Field(..., min_length=4, max_length=128)
+
+
+class GenericStatusMessage(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     id: str
     email: str

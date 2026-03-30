@@ -15,3 +15,6 @@ db = client[os.environ.get("DB_NAME", "tareas_hogar")]
 SECRET_KEY = os.environ.get("JWT_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7  # 1 week
+
+# Password reset (forgot-password flow)
+PASSWORD_RESET_TOKEN_TTL_MINUTES = int(os.environ.get("PASSWORD_RESET_TOKEN_TTL_MINUTES", "60"))
