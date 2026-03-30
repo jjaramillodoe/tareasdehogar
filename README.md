@@ -194,11 +194,16 @@ cd backend && pytest
 
 ## 📄 Licencia
 
-MIT (según versión anterior del proyecto).
+**Propietaria — no es software libre.** Ver el archivo **[LICENSE](./LICENSE)** (incluye tabla de contacto para completar: correo, web).
 
-## 👨‍💻 Autor
+**HabitApp** — powered by **ESPERA ZERO QUEUE S.A.**  
+Quedan reservados todos los derechos. El uso, copia o distribución del código requiere autorización expresa de **ESPERA ZERO QUEUE S.A.**
 
-Desarrollado para familias que quieren enseñar responsabilidad y hábitos financieros.
+## 👨‍💻 Titularidad
+
+- **Razón social:** ESPERA ZERO QUEUE S.A.
+- **Estilo comercial:** *Espera Zero Queue*
+- **Producto:** **HabitApp**
 
 ---
 
