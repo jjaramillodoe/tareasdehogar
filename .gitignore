@@ -1,107 +1,98 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# --- OS ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
 
-# IDE and editors
+# --- IDE ---
 .idea/
 .vscode/
+.cursor/
 
-# Dependencies
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*token.json*
+*credentials.json*
+google-services.json
+GoogleService-Info.plist
+
+# --- Dependencies ---
 node_modules/
-/node_modules
-/.pnp
+.pnp
 .pnp.js
-.yarn/install-state.gz
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
 
-# Testing
-/coverage
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+venv/
+.venv/
 
-# Next.js
-/.next/
-/out/
-next-env.d.ts
-*.tsbuildinfo
-
-# Production builds
-/build
-dist/
-dist
-
-# Environment files (comprehensive coverage)
-
-*token.json*
-*credentials.json*
-
-# Logs and debug files
+# --- Logs ---
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
 
-# System files
-.DS_Store
-*.pem
+# --- Builds / caches ---
+.cache/
+/coverage
+/build
+dist/
+web-build/
+*.tsbuildinfo
+next-env.d.ts
+expo-env.d.ts
 
-# Python
-__pycache__/
-*pyc*
-venv/
-.venv/
+# --- Expo / React Native ---
+.expo/
+.expo-shared/
+.metro-cache/
+.metro-health-check*
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+*.orig.*
+.kotlin/
+ios/Pods/
+android/.gradle/
+android/app/build/
+android/build/
 
-# Development tools
-chainlit.md
+# --- App data (keep folder, not files) ---
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# --- Generated legal HTML (PDF/MD se versionan) ---
+docs/legal/*.html
+
+# --- Platform leftovers (no publicar) ---
+.emergent/
+.gitconfig
+memory/
+test_reports/
+test_result.md
 .chainlit
 .ipynb_checkpoints/
 .ac
-
-# Deployment
 .vercel
-
-# Data and databases
-agenthub/agents/youtube/db
-
-# Archive files and large assets
-**/*.zip
-**/*.tar.gz
-**/*.tar
-**/*.tgz
-*.pack
-*.deb
-*.dylib
-
-# Build caches
-.cache/
-
-# Mobile development
-android-sdk/ -e 
-# Environment files
-*.env
-*.env.*
-
-# metro cache
-.metro-cache/
-
-# Expo
-.expo/
-
-# yarn
-yarn.lock
-
-# package-lock.json
-package-lock.json
-
-# bun.lockb
-bun.lockb
-
-# bun.lock
-bun.lock
-
-# bun.lockb
-bun.lockb
-
-# emergent
-.emergent/
