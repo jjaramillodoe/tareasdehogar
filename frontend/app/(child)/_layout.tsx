@@ -1,8 +1,10 @@
-import React from 'react';
-import { Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/colors';
+import { notificationsAPI } from '../../src/services/api';
+
 
 function tabIcon(
   focused: boolean,
@@ -12,13 +14,29 @@ function tabIcon(
   return (
     <Ionicons
       name={focused ? solid : outline}
-      size={focused ? 26 : 24}
+      size={24}
       color={focused ? Colors.primary : Colors.textSecondary}
     />
   );
 }
 
 export default function ChildLayout() {
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const data = await notificationsAPI.getUnreadCount();
+        setUnreadCount(data.unread_count || 0);
+      } catch {
+        // ignore
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <Tabs
       screenOptions={{
@@ -27,88 +45,89 @@ export default function ChildLayout() {
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: {
           backgroundColor: Colors.surface,
-          borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 88 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-          paddingTop: 10,
-          shadowColor: Colors.primaryDark,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.08,
-          shadowRadius: 12,
-          elevation: 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: Colors.borderDark,
+          height: Platform.OS === 'ios' ? 86 : 66,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          paddingTop: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '700',
-          letterSpacing: 0.2,
-        },
-        tabBarItemStyle: {
-          paddingTop: 4,
         },
       }}
     >
       <Tabs.Screen
+        name="home"
+        options={{
+          title: 'Inicio',
+          tabBarIcon: ({ focused }) => tabIcon(focused, 'home-outline', 'home'),
+        }}
+      />
+      <Tabs.Screen
         name="tasks"
         options={{
           title: 'Tareas',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'clipboard-outline', 'clipboard'),
+          tabBarIcon: ({ focused }) => tabIcon(focused, 'clipboard-outline', 'clipboard'),
         }}
       />
       <Tabs.Screen
         name="goals"
         options={{
           title: 'Metas',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'trophy-outline', 'trophy'),
+          tabBarIcon: ({ focused }) => tabIcon(focused, 'trophy-outline', 'trophy'),
         }}
       />
       <Tabs.Screen
-        name="logros"
+        name="more"
         options={{
-          title: 'Logros',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'ribbon-outline', 'ribbon'),
+          title: 'Más',
+          tabBarIcon: ({ focused }) => (
+            <View>
+              <Ionicons
+                name={focused ? 'menu' : 'menu-outline'}
+                size={24}
+                color={focused ? Colors.primary : Colors.textSecondary}
+              />
+              {unreadCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
-      <Tabs.Screen
-        name="payments"
-        options={{
-          title: 'Pagos',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'wallet-outline', 'wallet'),
-        }}
-      />
-      <Tabs.Screen
-        name="notifications"
-        options={{
-          title: 'Alertas',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'notifications-outline', 'notifications'),
-        }}
-      />
-      <Tabs.Screen
-        name="report"
-        options={{
-          title: 'Reporte',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'stats-chart-outline', 'stats-chart'),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Perfil',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'person-circle-outline', 'person-circle'),
-        }}
-      />
-      <Tabs.Screen
-        name="family-badges"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="logros" options={{ href: null }} />
+      <Tabs.Screen name="payments" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="report" options={{ href: null }} />
+      <Tabs.Screen name="profile" options={{ href: null }} />
+      <Tabs.Screen name="family-badges" options={{ href: null }} />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    right: -8,
+    top: -4,
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: Colors.surface,
+  },
+  badgeText: {
+    color: Colors.white,
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+});

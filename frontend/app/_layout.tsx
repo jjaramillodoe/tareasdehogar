@@ -6,9 +6,18 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuthStore } from '../src/store/authStore';
 import { Colors } from '../src/constants/colors';
 import SplashScreen from '../src/components/SplashScreen';
+import ConnectivityBanner from '../src/components/ConnectivityBanner';
+import { registerForPushNotificationsAsync } from '../src/services/push';
 
 export default function RootLayout() {
-  const { initialize, isInitialized, isLoading, touchActivity, enforceAutoLogout } = useAuthStore();
+  const {
+    initialize,
+    isInitialized,
+    isLoading,
+    touchActivity,
+    enforceAutoLogout,
+    token,
+  } = useAuthStore();
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
@@ -32,26 +41,33 @@ export default function RootLayout() {
     return () => clearInterval(timer);
   }, [enforceAutoLogout]);
 
+  useEffect(() => {
+    if (!token) return;
+    registerForPushNotificationsAsync().catch(() => undefined);
+  }, [token]);
   if (showSplash) {
     return (
-      <>
+      <SafeAreaProvider>
         <StatusBar style="dark" />
         <SplashScreen onFinish={() => setShowSplash(false)} />
-      </>
+      </SafeAreaProvider>
     );
   }
 
   if (!isInitialized || isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
+      <SafeAreaProvider>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaProvider>
     );
   }
 
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
+      <ConnectivityBanner />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(public)" />

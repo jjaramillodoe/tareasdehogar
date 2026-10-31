@@ -1,5 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNetworkStore } from '../store/networkStore';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const LAST_ACTIVITY_KEY = 'last_activity_ms';
@@ -10,6 +11,8 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+let handlingUnauthorized = false;
 
 // Add token to requests
 api.interceptors.request.use(async (config) => {
@@ -22,6 +25,50 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => {
+    useNetworkStore.getState().setOffline(false);
+    return response;
+  },
+  async (error) => {
+    const status = error?.response?.status;
+    if (!error.response) {
+      useNetworkStore.getState().setOffline(true);
+    } else {
+      useNetworkStore.getState().setOffline(false);
+    }
+
+    if (status === 401 && !handlingUnauthorized) {
+      const url = String(error?.config?.url || '');
+      const isAuthAttempt =
+        url.includes('/auth/login') ||
+        url.includes('/auth/register') ||
+        url.includes('/auth/child-login') ||
+        url.includes('/auth/forgot-password') ||
+        url.includes('/auth/reset-password');
+      if (!isAuthAttempt) {
+        handlingUnauthorized = true;
+        try {
+          await AsyncStorage.removeItem('token');
+          await AsyncStorage.removeItem(LAST_ACTIVITY_KEY);
+          // Lazy import avoids circular dependency with authStore ↔ api
+          const { useAuthStore } = await import('../store/authStore');
+          useAuthStore.setState({
+            token: null,
+            user: null,
+            family: null,
+            selectedChild: null,
+            isChildSession: false,
+          });
+        } finally {
+          handlingUnauthorized = false;
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Auth API
 export const authAPI = {
   register: async (
@@ -29,11 +76,13 @@ export const authAPI = {
     password: string,
     name: string,
     invite_code?: string,
-    device_name?: string
+    device_name?: string,
+    gender?: 'mujer' | 'hombre'
   ) => {
     const body: Record<string, string> = { email, password, name };
     if (invite_code?.trim()) body.invite_code = invite_code.trim();
     if (device_name?.trim()) body.device_name = device_name.trim();
+    if (gender) body.gender = gender;
     const response = await api.post('/auth/register', body);
     return response.data;
   },
@@ -43,6 +92,10 @@ export const authAPI = {
   },
   getMe: async () => {
     const response = await api.get('/auth/me');
+    return response.data;
+  },
+  updateProfile: async (data: { gender?: 'mujer' | 'hombre' }) => {
+    const response = await api.patch('/auth/me', data);
     return response.data;
   },
   getSession: async () => {
@@ -240,7 +293,7 @@ export const familyAPI = {
     return response.data as {
       family_name: string;
       currency: string;
-      children: { name: string; alias?: string | null }[];
+      children: { name: string; alias?: string | null; gender?: 'mujer' | 'hombre' | null }[];
     };
   },
 };
@@ -376,6 +429,19 @@ export const choresAPI = {
   ) => {
     const response = await api.post(`/chores/${choreId}/approve`, opts ?? {});
     return response.data;
+  },
+  approveBulk: async (opts?: {
+    chore_ids?: string[];
+    max_amount?: number;
+    rating?: number;
+  }) => {
+    const response = await api.post('/chores/approve/bulk', opts ?? {});
+    return response.data as {
+      approved_count: number;
+      skipped_count: number;
+      total_amount: number;
+      approved_ids: string[];
+    };
   },
   /** Vista previa del reparto saldo / meta de ahorro (misma lógica que al aprobar). */
   previewSavingsSplit: async (
@@ -535,6 +601,18 @@ export const savingsGoalsAPI = {
     const response = await api.post('/savings-goals', data);
     return response.data;
   },
+  propose: async (data: { title: string; note?: string; target_amount: number }) => {
+    const response = await api.post('/savings-goals/propose', data);
+    return response.data as SavingsGoalDTO;
+  },
+  approveProposal: async (goalId: string) => {
+    const response = await api.post(`/savings-goals/${goalId}/approve-proposal`);
+    return response.data as SavingsGoalDTO;
+  },
+  rejectProposal: async (goalId: string) => {
+    const response = await api.post(`/savings-goals/${goalId}/reject-proposal`);
+    return response.data as SavingsGoalDTO;
+  },
   getAll: async (childId?: string) => {
     const params = childId ? { child_id: childId } : {};
     const response = await api.get('/savings-goals', { params });
@@ -574,8 +652,26 @@ export type SavingsGoalDTO = {
   child_id: string;
   family_id?: string;
   is_completed: boolean;
+  status?: 'active' | 'pending' | 'rejected';
+  proposed_by_child?: boolean;
   milestones_reached?: number[];
   last_milestone_reached?: number | null;
+};
+
+export const mediaAPI = {
+  uploadEvidence: async (localUri: string, mimeType?: string) => {
+    const name = localUri.split('/').pop() || `evidence-${Date.now()}.jpg`;
+    const form = new FormData();
+    form.append('file', {
+      uri: localUri,
+      name,
+      type: mimeType || 'image/jpeg',
+    } as unknown as Blob);
+    const response = await api.post('/media/evidence', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data as { url: string; ok: boolean };
+  },
 };
 
 // Notifications API
@@ -603,6 +699,14 @@ export const notificationsAPI = {
   deleteMany: async (ids: string[]) => {
     const response = await api.delete('/notifications/bulk', { data: { ids } });
     return response.data as { deleted_count: number };
+  },
+  registerPushToken: async (data: {
+    token: string;
+    platform?: string;
+    device_name?: string;
+  }) => {
+    const response = await api.post('/notifications/push-token', data);
+    return response.data as { ok: boolean; scope: string };
   },
 };
 

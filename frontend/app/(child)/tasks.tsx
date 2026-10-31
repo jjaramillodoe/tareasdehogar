@@ -3,21 +3,27 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
   Alert,
-  Modal,
   TextInput,
 } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
-import { choresAPI, statsAPI, childrenAPI, paymentsAPI } from '../../src/services/api';
+import { choresAPI, statsAPI, childrenAPI, paymentsAPI, mediaAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import { shadow } from '../../src/utils/shadow';
+import Button from '../../src/components/ui/Button';
+import { resolveMediaUrl } from '../../src/utils/mediaUrl';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
+import ChildScreenShell, {
+  ChildEmptyState,
+  ChildStatPill,
+} from '../../src/components/ChildScreenShell';
+
 
 interface Chore {
   id: string;
@@ -26,6 +32,7 @@ interface Chore {
   amount: number;
   frequency: string;
   status: string;
+  scheduled_date?: string | null;
 }
 
 interface Stats {
@@ -104,23 +111,53 @@ export default function ChildTasksScreen() {
     }, [selectedChild, loadData, isExiting])
   );
 
-  const pickEvidencePhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permiso', 'Necesitamos acceso a tus fotos para adjuntar evidencia.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.5,
-      base64: true,
-    });
-    if (!result.canceled && result.assets[0]?.base64) {
-      const mime = result.assets[0].mimeType || 'image/jpeg';
-      setPhotoUri(`data:${mime};base64,${result.assets[0].base64}`);
-    }
+  const applyPickedAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset.uri) return;
+    setPhotoUri(asset.uri);
+  };
+
+  const pickEvidencePhoto = () => {
+    Alert.alert('Evidencia', '¿Cómo quieres agregar la foto?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Cámara',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permiso', 'Necesitamos acceso a la cámara.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.55,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await applyPickedAsset(result.assets[0]);
+          }
+        },
+      },
+      {
+        text: 'Galería',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permiso', 'Necesitamos acceso a tus fotos.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.55,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await applyPickedAsset(result.assets[0]);
+          }
+        },
+      },
+    ]);
   };
 
   const handleCompleteChore = async () => {
@@ -128,11 +165,20 @@ export default function ChildTasksScreen() {
 
     setCompleting(true);
     try {
+      let photoUrl: string | undefined;
+      if (photoUri) {
+        if (photoUri.startsWith('http') || photoUri.startsWith('/uploads/')) {
+          photoUrl = photoUri;
+        } else {
+          const uploaded = await mediaAPI.uploadEvidence(photoUri, 'image/jpeg');
+          photoUrl = uploaded.url;
+        }
+      }
       await choresAPI.complete(
         selectedChore.id,
         selectedChild.id,
         comment.trim() || undefined,
-        photoUri || undefined
+        photoUrl
       );
       Alert.alert('Éxito', 'Tarea marcada como completada. Esperando aprobación.');
       setShowCompleteModal(false);
@@ -221,248 +267,197 @@ export default function ChildTasksScreen() {
 
   if (!selectedChild) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-            <Ionicons name="arrow-back" size={24} color={Colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Vista de Hijo</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle-outline" size={64} color={Colors.error} />
-          <Text style={styles.errorText}>No hay hijo seleccionado</Text>
-          <TouchableOpacity style={styles.goBackButton} onPress={handleBack}>
-            <Text style={styles.goBackButtonText}>Volver al inicio</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <ChildScreenShell title="Tareas" subtitle="Sin hijo seleccionado" showBack onBack={handleBack}>
+        <ChildEmptyState
+          icon="alert-circle-outline"
+          title="No hay hijo seleccionado"
+          subtitle="Vuelve al inicio e intenta de nuevo."
+        />
+        <TouchableOpacity style={styles.goBackButton} onPress={handleBack}>
+          <Text style={styles.goBackButtonText}>Volver al inicio</Text>
+        </TouchableOpacity>
+      </ChildScreenShell>
     );
   }
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  const pendingChores = chores
+    .filter((c) => c.status === 'pendiente')
+    .sort((a, b) => {
+      const da = a.scheduled_date ? String(a.scheduled_date).slice(0, 10) : '';
+      const db = b.scheduled_date ? String(b.scheduled_date).slice(0, 10) : '';
+      return da.localeCompare(db);
+    });
+  const inReviewChores = chores.filter((c) => c.status === 'completada' || c.status === 'rechazada');
+  const recentApproved = chores.filter((c) => c.status === 'aprobada').slice(0, 8);
+  const otherChores = [...inReviewChores, ...recentApproved];
+  const displayName = childData?.alias || childData?.name || selectedChild.name;
+  const currency = family?.currency || 'USD';
 
-  const pendingChores = chores.filter((c) => c.status === 'pendiente');
-  const otherChores = chores.filter((c) => c.status !== 'pendiente');
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>{childData?.name || selectedChild.name}</Text>
-          <Text style={styles.headerSubtitle}>
-            {isChildSession ? 'Tareas y fotos' : 'Vista de hijo'}
-          </Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadData();
-            }}
-          />
+      <ChildScreenShell
+        title="Tareas"
+        subtitle={`${displayName} · completa y gana`}
+        loading={isLoading}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          loadData();
+        }}
+        headerExtra={
+          <View style={styles.balanceHero}>
+            <Text style={styles.balanceLabel}>Tu saldo</Text>
+            <Text style={styles.balanceAmount}>
+              {currency} {Number(childData?.balance ?? 0).toFixed(2)}
+            </Text>
+            <View style={styles.challengePill}>
+              <Ionicons
+                name={weeklySavingsChallenge.reached ? 'trophy' : 'flame'}
+                size={16}
+                color={Colors.secondaryInk}
+              />
+              <Text style={styles.challengePillText}>
+                Ahorro semanal {weeklyChallengeTarget}%:{' '}
+                {weeklySavingsChallenge.percent.toFixed(0)}%
+                {weeklySavingsChallenge.reached ? ' · ¡Cumplido!' : ''}
+              </Text>
+            </View>
+          </View>
         }
       >
-        {/* Balance Card */}
-        <View style={styles.balanceCard}>
-          <View style={styles.balanceIcon}>
-            <Ionicons name="wallet" size={32} color={Colors.onSecondary} />
+        {stats ? (
+          <View style={styles.statsRow}>
+            <ChildStatPill icon="time-outline" value={stats.pending_tasks} label="Pendientes" tone="primary" />
+            <ChildStatPill icon="hourglass-outline" value={stats.completed_tasks} label="En revisión" tone="secondary" />
+            <ChildStatPill icon="checkmark-circle" value={stats.approved_tasks} label="Aprobadas" tone="success" />
           </View>
-          <View style={styles.balanceInfo}>
-            <Text style={styles.balanceLabel}>Mi Saldo</Text>
-            <Text style={styles.balanceAmount}>
-              {family?.currency} {childData?.balance?.toFixed(2) || '0.00'}
-            </Text>
-          </View>
-        </View>
+        ) : null}
 
-        {/* Stats */}
-        {stats && (
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.pending_tasks}</Text>
-              <Text style={styles.statLabel}>Pendientes</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.completed_tasks}</Text>
-              <Text style={styles.statLabel}>Completadas</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{stats.approved_tasks}</Text>
-              <Text style={styles.statLabel}>Aprobadas</Text>
-            </View>
-          </View>
-        )}
-
-        <View style={styles.challengeBadgeCard}>
-          <Ionicons
-            name={weeklySavingsChallenge.reached ? 'trophy' : 'trophy-outline'}
-            size={20}
-            color={weeklySavingsChallenge.reached ? Colors.secondaryDark : Colors.primary}
-          />
-          <Text style={styles.challengeBadgeText}>
-            Desafío semanal ahorro {weeklyChallengeTarget}%: {weeklySavingsChallenge.percent.toFixed(1)}%
-            {weeklySavingsChallenge.reached
-              ? ' ¡Cumplido!'
-              : weeklySavingsChallenge.totalPaid > 0
-                ? ' en progreso'
-                : ' (sin pagos aún)'}
-          </Text>
-        </View>
-
-        {/* Pending Tasks */}
         <View style={styles.section}>
           <View style={styles.sectionHeadRow}>
-            <Text style={styles.sectionTitle}>Tareas Pendientes</Text>
+            <Text style={styles.sectionTitle}>Pendientes</Text>
             <View style={styles.sectionCountBadge}>
               <Text style={styles.sectionCountText}>{pendingChores.length}</Text>
             </View>
           </View>
           {pendingChores.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
-              <Text style={styles.emptyStateText}>¡No tienes tareas pendientes!</Text>
-            </View>
+            <ChildEmptyState
+              icon="checkmark-circle"
+              title="¡No tienes tareas pendientes!"
+              subtitle="Cuando tu familia asigne algo nuevo, aparecerá aquí."
+            />
           ) : (
             pendingChores.map((chore) => (
               <View key={chore.id} style={styles.choreCard}>
-                <View style={styles.choreInfo}>
-                  <View style={styles.choreTopRow}>
-                    <Text style={styles.choreTitle}>{chore.title}</Text>
-                    <View style={styles.rewardPill}>
-                      <Text style={styles.rewardPillText}>
-                        {family?.currency} {chore.amount.toFixed(2)}
-                      </Text>
-                    </View>
+                <View style={styles.choreTopRow}>
+                  <View style={styles.choreIcon}>
+                    <Ionicons name="clipboard-outline" size={18} color={Colors.primary} />
                   </View>
-                  {chore.description && (
-                    <Text style={styles.choreDescription}>{chore.description}</Text>
-                  )}
-                  <Text style={styles.choreRewardLabel}>Recompensa por completar</Text>
+                  <View style={styles.choreText}>
+                    <Text style={styles.choreTitle}>{chore.title}</Text>
+                    {chore.description ? (
+                      <Text style={styles.choreDescription}>{chore.description}</Text>
+                    ) : null}
+                    <Text style={styles.choreAmount}>
+                      {currency} {chore.amount.toFixed(2)}
+                    </Text>
+                  </View>
                 </View>
-                <TouchableOpacity
+                <Button
+                  label="Completar"
+                  icon="rocket"
+                  variant="kid"
                   style={styles.completeButton}
                   onPress={() => openCompleteModal(chore)}
-                >
-                  <Ionicons name="checkmark-circle" size={24} color={Colors.white} />
-                  <Text style={styles.completeButtonText}>Completar</Text>
-                </TouchableOpacity>
+                />
               </View>
             ))
           )}
         </View>
 
-        {/* Other Tasks */}
-        {otherChores.length > 0 && (
+        {otherChores.length > 0 ? (
           <View style={styles.section}>
             <View style={styles.sectionHeadRow}>
-              <Text style={styles.sectionTitle}>Otras Tareas</Text>
+              <Text style={styles.sectionTitle}>En revisión y recientes</Text>
               <View style={styles.sectionCountBadgeMuted}>
                 <Text style={styles.sectionCountTextMuted}>{otherChores.length}</Text>
               </View>
             </View>
             {otherChores.map((chore) => (
               <View key={chore.id} style={styles.otherChoreCard}>
-                <View style={styles.choreInfo}>
-                  <View style={styles.choreTopRow}>
+                <View style={styles.choreTopRow}>
+                  <View style={[styles.choreIcon, { backgroundColor: statusColors[chore.status] + '22' }]}>
+                    <Ionicons name="document-text-outline" size={18} color={statusColors[chore.status]} />
+                  </View>
+                  <View style={styles.choreText}>
                     <Text style={styles.choreTitle}>{chore.title}</Text>
-                    <Text style={styles.choreRewardSmall}>
-                      {family?.currency} {chore.amount.toFixed(2)}
+                    <Text style={styles.choreAmount}>
+                      {currency} {chore.amount.toFixed(2)}
                     </Text>
                   </View>
-                  <View style={styles.choreStatusContainer}>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: statusColors[chore.status] },
-                      ]}
-                    >
-                      <Text style={styles.statusBadgeText}>
-                        {statusLabels[chore.status]}
-                      </Text>
-                    </View>
+                  <View style={[styles.statusBadge, { backgroundColor: statusColors[chore.status] }]}>
+                    <Text style={styles.statusBadgeText}>{statusLabels[chore.status]}</Text>
                   </View>
                 </View>
               </View>
             ))}
           </View>
-        )}
-      </ScrollView>
+        ) : null}
 
-      {/* Complete Modal */}
-      <Modal
+        {!isChildSession ? (
+          <TouchableOpacity style={styles.parentExit} onPress={handleBack}>
+            <Ionicons name="exit-outline" size={18} color={Colors.textSecondary} />
+            <Text style={styles.parentExitText}>Salir de vista de hijo</Text>
+          </TouchableOpacity>
+        ) : null}
+      </ChildScreenShell>
+
+      <AppModal
         visible={showCompleteModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowCompleteModal(false)}
+        onClose={() => setShowCompleteModal(false)}
+        title="Marcar como completada"
+        subtitle={selectedChore?.title}
+        icon="checkmark-circle-outline"
+        iconTone="success"
+        variant="sheet"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowCompleteModal(false)}
+            confirmLabel="Marcar como completada"
+            onConfirm={handleCompleteChore}
+            confirming={completing}
+            confirmTone="success"
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Marcar como completada</Text>
-            <Text style={styles.modalSubtitle}>{selectedChore?.title}</Text>
-            <Text style={styles.modalHint}>
-              Opcional: una foto ayuda a tu familia a verificar el trabajo antes de aprobar.
-            </Text>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Comentario (opcional)</Text>
-              <TextInput
-                style={[styles.textInput, styles.textArea]}
-                placeholder="¿Algún comentario sobre la tarea?"
-                placeholderTextColor={Colors.textLight}
-                value={comment}
-                onChangeText={setComment}
-                multiline
-                numberOfLines={3}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.photoBtn} onPress={pickEvidencePhoto}>
-              <Ionicons name="camera-outline" size={22} color={Colors.primary} />
-              <Text style={styles.photoBtnText}>
-                {photoUri ? 'Cambiar foto de evidencia' : 'Adjuntar foto de la tarea'}
-              </Text>
-            </TouchableOpacity>
-            {photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.previewPhoto} contentFit="cover" />
-            ) : null}
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowCompleteModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, completing && styles.buttonDisabled]}
-                onPress={handleCompleteChore}
-                disabled={completing}
-              >
-                {completing ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.submitButtonText}>Marcar como completada</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        <Text style={modalFieldStyles.hint}>
+          Opcional: una foto ayuda a tu familia a verificar el trabajo antes de aprobar.
+        </Text>
+        <Text style={modalFieldStyles.label}>Comentario (opcional)</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="¿Algún comentario sobre la tarea?"
+          placeholderTextColor={Colors.textLight}
+          value={comment}
+          onChangeText={setComment}
+          multiline
+          numberOfLines={3}
+        />
+        <TouchableOpacity style={styles.photoBtn} onPress={pickEvidencePhoto}>
+          <Ionicons name="camera-outline" size={22} color={Colors.primary} />
+          <Text style={styles.photoBtnText}>
+            {photoUri ? 'Cambiar foto de evidencia' : 'Foto con cámara o galería'}
+          </Text>
+        </TouchableOpacity>
+        {photoUri ? (
+          <Image
+            source={{ uri: resolveMediaUrl(photoUri) || photoUri }}
+            style={styles.previewPhoto}
+            contentFit="cover"
+          />
+        ) : null}
+      </AppModal>
 
       {showChallengeToast ? (
         <View style={styles.challengeToast}>
@@ -493,6 +488,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.background,
   },
+  scroll: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  greeting: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  name: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: Colors.text,
+    letterSpacing: -0.6,
+    marginTop: 2,
+  },
+  hint: {
+    marginTop: 4,
+    marginBottom: 18,
+    fontSize: 14,
+    color: Colors.textSecondary,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -508,19 +525,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: Colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
   },
   errorContainer: {
     flex: 1,
@@ -546,89 +554,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  balanceCard: {
-    backgroundColor: Colors.secondary,
-    borderRadius: 20,
-    padding: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.secondaryDark,
-  },
-  balanceIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.primary + '14',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  challengeBadgeCard: {
-    marginBottom: 16,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  challengeBadgeText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  balanceInfo: {
-    marginLeft: 20,
+  balanceHero: {
+    backgroundColor: Colors.primary,
+    borderRadius: 24,
+    padding: 18,
+    ...shadow({ color: Colors.primaryDark, offsetY: 4, blur: 12, opacity: 0.25, elevation: 4 }),
   },
   balanceLabel: {
-    fontSize: 14,
-    color: Colors.onSecondaryMuted,
-    opacity: 1,
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   balanceAmount: {
+    marginTop: 4,
+    color: Colors.white,
     fontSize: 32,
-    fontWeight: 'bold',
-    color: Colors.onSecondary,
-    marginTop: 4,
+    fontWeight: '800',
+    letterSpacing: -0.8,
   },
-  statsContainer: {
+  challengePill: {
+    marginTop: 12,
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  statItem: {
-    flex: 1,
     alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.secondary,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
   },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  statLabel: {
+  challengePillText: {
+    color: Colors.secondaryInk,
     fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 4,
+    fontWeight: '700',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 22,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.text,
-    marginBottom: 12,
   },
   sectionHeadRow: {
     flexDirection: 'row',
@@ -664,17 +637,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textSecondary,
   },
-  emptyState: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 32,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: Colors.text,
-    marginTop: 12,
-  },
   choreCard: {
     backgroundColor: Colors.surface,
     borderRadius: 16,
@@ -682,70 +644,51 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: Colors.border,
-  },
-  choreInfo: {
-    marginBottom: 12,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 3, blur: 10, opacity: 0.08, elevation: 3 }),
   },
   choreTopRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
-  choreTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: Colors.text,
+  choreIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Colors.primary + '14',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choreText: {
     flex: 1,
   },
+  choreTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text,
+  },
   choreDescription: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textSecondary,
     marginTop: 4,
+    lineHeight: 18,
   },
-  rewardPill: {
-    marginTop: 8,
-    backgroundColor: Colors.secondary + '33',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: Colors.secondaryDark,
-  },
-  rewardPillText: {
-    fontSize: 12,
+  choreAmount: {
+    marginTop: 6,
+    fontSize: 14,
     fontWeight: '700',
-    color: Colors.onSecondary,
-  },
-  choreRewardLabel: {
-    marginTop: 8,
-    fontSize: 12,
     color: Colors.textSecondary,
   },
   completeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.success,
-    padding: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  completeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
+    marginTop: 14,
   },
   otherChoreCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: Colors.border,
-  },
-  choreStatusContainer: {
-    marginTop: 8,
   },
   statusBadge: {
     alignSelf: 'flex-start',
@@ -754,31 +697,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     color: Colors.white,
   },
-  choreRewardSmall: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
+  parentExit: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    gap: 6,
+    paddingVertical: 12,
   },
-  modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-    textAlign: 'center',
+  parentExitText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
   photoBtn: {
     flexDirection: 'row',
@@ -799,74 +732,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: Colors.background,
   },
-  modalSubtitle: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  modalHint: {
-    fontSize: 13,
-    color: Colors.textLight,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 16,
-    paddingHorizontal: 4,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  submitButton: {
-    flex: 2,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.success,
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
   challengeToast: {
     position: 'absolute',
     left: 16,
@@ -880,11 +745,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 8,
+    ...shadow({ color: Colors.black, offsetX: 0, offsetY: 4, blur: 8, opacity: 0.18, elevation: 8 }),
   },
   challengeToastText: {
     color: Colors.white,

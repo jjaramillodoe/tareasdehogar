@@ -1,9 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { paymentsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
+import ChildScreenShell, { ChildEmptyState } from '../../src/components/ChildScreenShell';
+import { shadow } from '../../src/utils/shadow';
 
 interface Payment {
   id: string;
@@ -69,28 +71,22 @@ export default function ChildReportScreen() {
 
   if (!selectedChild) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>No hay hijo seleccionado.</Text>
-      </View>
+      <ChildScreenShell title="Reporte" showBack>
+        <ChildEmptyState icon="alert-circle-outline" title="No hay hijo seleccionado" />
+      </ChildScreenShell>
     );
   }
 
-  if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  const currency = family?.currency || 'USD';
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Mi Reporte</Text>
-        <Text style={styles.subtitle}>Tus avances de ahorro y gasto</Text>
-      </View>
-
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 24 }}>
+    <ChildScreenShell
+      title="Reporte"
+      subtitle="Tus avances de ahorro y gasto"
+      loading={isLoading}
+      showBack
+      accent="blue"
+      headerExtra={
         <View style={styles.segment}>
           {[7, 14].map((n) => (
             <TouchableOpacity
@@ -98,70 +94,121 @@ export default function ChildReportScreen() {
               style={[styles.segBtn, rangeDays === n && styles.segBtnOn]}
               onPress={() => setRangeDays(n as RangeDays)}
             >
-              <Text style={[styles.segText, rangeDays === n && styles.segTextOn]}>{n}d</Text>
+              <Text style={[styles.segText, rangeDays === n && styles.segTextOn]}>{n} días</Text>
             </TouchableOpacity>
           ))}
         </View>
+      }
+    >
+      <View style={styles.heroCard}>
+        <Text style={styles.heroLabel}>Saldo actual</Text>
+        <Text style={styles.heroValue}>
+          {currency} {Number(selectedChild.balance).toFixed(2)}
+        </Text>
+      </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Tendencia amigable ({rangeDays} dias)</Text>
-          <View style={styles.barsRow}>
-            {chart.days.map((d) => (
-              <View key={d.key} style={styles.dayCol}>
-                <View style={styles.stack}>
-                  <View style={[styles.barEarned, { height: Math.max(3, (d.earned / chart.maxVal) * 42) }]} />
-                  <View style={[styles.barSaved, { height: Math.max(3, (d.saved / chart.maxVal) * 42) }]} />
-                  <View style={[styles.barSpent, { height: Math.max(3, (d.spent / chart.maxVal) * 42) }]} />
-                </View>
-                <Text style={styles.dayLabel}>{d.label}</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Tendencia ({rangeDays} días)</Text>
+        <View style={styles.barsRow}>
+          {chart.days.map((d) => (
+            <View key={d.key} style={styles.dayCol}>
+              <View style={styles.stack}>
+                <View style={[styles.barEarned, { height: Math.max(3, (d.earned / chart.maxVal) * 48) }]} />
+                <View style={[styles.barSaved, { height: Math.max(3, (d.saved / chart.maxVal) * 48) }]} />
+                <View style={[styles.barSpent, { height: Math.max(3, (d.spent / chart.maxVal) * 48) }]} />
               </View>
-            ))}
-          </View>
-          <Text style={styles.metric}>Ganado: {family?.currency} {chart.earned.toFixed(2)}</Text>
-          <Text style={styles.metric}>Ahorrado: {family?.currency} {chart.saved.toFixed(2)}</Text>
-          <Text style={styles.metric}>Gastado: {family?.currency} {chart.spent.toFixed(2)}</Text>
-          <Text style={styles.metricStrong}>Saldo actual: {family?.currency} {selectedChild.balance.toFixed(2)}</Text>
+              <Text style={styles.dayLabel}>{d.label}</Text>
+            </View>
+          ))}
         </View>
-      </ScrollView>
-    </View>
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: Colors.success }]} />
+            <Text style={styles.legendText}>Ganado</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
+            <Text style={styles.legendText}>Ahorrado</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: Colors.accent }]} />
+            <Text style={styles.legendText}>Gastado</Text>
+          </View>
+        </View>
+        <Text style={styles.metric}>
+          Ganado: {currency} {chart.earned.toFixed(2)}
+        </Text>
+        <Text style={styles.metric}>
+          Ahorrado: {currency} {chart.saved.toFixed(2)}
+        </Text>
+        <Text style={styles.metric}>
+          Gastado: {currency} {chart.spent.toFixed(2)}
+        </Text>
+      </View>
+    </ChildScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-  muted: { color: Colors.textSecondary, fontSize: 14 },
-  header: { paddingTop: 56, paddingHorizontal: 20, paddingBottom: 14, backgroundColor: Colors.surface },
-  title: { fontSize: 22, fontWeight: '700', color: Colors.text },
-  subtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: 4 },
-  content: { flex: 1, padding: 16 },
   segment: {
     flexDirection: 'row',
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: 'hidden',
-    marginBottom: 14,
+    marginTop: 14,
+    backgroundColor: Colors.surface,
   },
-  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, backgroundColor: Colors.surface },
+  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 10 },
   segBtnOn: { backgroundColor: Colors.primary + '18' },
   segText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
   segTextOn: { color: Colors.primary },
+  heroCard: {
+    backgroundColor: Colors.primary,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 8, blur: 18, opacity: 0.28, elevation: 8 }),
+  },
+  heroLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroValue: {
+    marginTop: 6,
+    color: Colors.white,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+  },
   card: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 16,
+    padding: 16,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 3, blur: 10, opacity: 0.08, elevation: 3 }),
   },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: Colors.text, marginBottom: 8 },
-  barsRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10 },
+  cardTitle: { fontSize: 16, fontWeight: '800', color: Colors.text, marginBottom: 12 },
+  barsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    minHeight: 56,
+  },
   dayCol: { alignItems: 'center', flex: 1 },
-  stack: { height: 46, flexDirection: 'row', alignItems: 'flex-end', gap: 2, marginBottom: 4 },
+  stack: { height: 52, flexDirection: 'row', alignItems: 'flex-end', gap: 2, marginBottom: 4 },
   barEarned: { width: 4, backgroundColor: Colors.success, borderRadius: 2 },
   barSaved: { width: 4, backgroundColor: Colors.primary, borderRadius: 2 },
   barSpent: { width: 4, backgroundColor: Colors.accent, borderRadius: 2 },
-  dayLabel: { fontSize: 10, color: Colors.textSecondary, textTransform: 'capitalize' },
-  metric: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  metricStrong: { fontSize: 13, color: Colors.text, marginTop: 6, fontWeight: '700' },
+  dayLabel: { fontSize: 10, color: Colors.textSecondary, textTransform: 'capitalize', fontWeight: '600' },
+  legend: { flexDirection: 'row', gap: 14, marginBottom: 12 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  metric: { fontSize: 14, color: Colors.textSecondary, marginTop: 4, fontWeight: '600' },
 });

@@ -8,12 +8,10 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
-  Modal,
   TextInput,
   ActivityIndicator,
   Platform,
   Share,
-  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
@@ -24,9 +22,16 @@ import * as DocumentPicker from 'expo-document-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { authAPI, familyAPI, paymentsAPI, childrenAPI, withdrawalsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
+import { MIN_PASSWORD_LENGTH } from '../../src/constants/auth';
 import { countryLabel } from '../../src/constants/spanishLocales';
 import { FamilyLocaleSection } from '../../src/components/FamilyLocaleSection';
+import ParentScreenShell from '../../src/components/ParentScreenShell';
+import AccordionSection from '../../src/components/AccordionSection';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
 import { Ionicons } from '@expo/vector-icons';
+import { shadow } from '../../src/utils/shadow';
+import { getParentAvatarSource } from '../../src/utils/avatars';
+
 
 interface Payment {
   id: string;
@@ -125,8 +130,20 @@ interface Child {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
-  const { user, family, setFamily, logout } = useAuthStore();
+  const { user, family, setFamily, logout, updateProfile } = useAuthStore();
+  const [savingGender, setSavingGender] = useState(false);
+
+  const handleParentGender = async (gender: 'mujer' | 'hombre') => {
+    if (user?.gender === gender || savingGender) return;
+    setSavingGender(true);
+    try {
+      await updateProfile({ gender });
+    } catch (e: any) {
+      Alert.alert('Error', e.response?.data?.detail || 'No se pudo guardar el perfil');
+    } finally {
+      setSavingGender(false);
+    }
+  };
   const [payments, setPayments] = useState<Payment[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -385,9 +402,12 @@ export default function ProfileScreen() {
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Cerrar Sesión',
+        style: 'destructive',
         onPress: () => {
-          logout();
-          router.replace('/');
+          void (async () => {
+            await logout();
+            router.replace('/');
+          })();
         },
       },
     ]);
@@ -496,8 +516,11 @@ export default function ProfileScreen() {
       Alert.alert('Error', 'Completa los campos de contraseña');
       return;
     }
-    if (passwordModal.newPassword.length < 4) {
-      Alert.alert('Error', 'La nueva contraseña debe tener al menos 4 caracteres');
+    if (passwordModal.newPassword.length < MIN_PASSWORD_LENGTH) {
+      Alert.alert(
+        'Error',
+        `La nueva contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`
+      );
       return;
     }
     if (passwordModal.newPassword !== passwordModal.confirmPassword) {
@@ -826,7 +849,21 @@ export default function ProfileScreen() {
     try {
       const res = await familyAPI.demoSeed();
       await loadData();
-      Alert.alert('Listo', `Demo generada: ${JSON.stringify(res.created)}`);
+      const c = res?.created || {};
+      const range =
+        c.from && c.to ? `${c.from} → ${c.to}` : 'período de ejemplo';
+      const cal =
+        c.calendar_from && c.calendar_to
+          ? `\nCalendario: ${c.calendar_from} → ${c.calendar_to}`
+          : '';
+      Alert.alert(
+        'Listo',
+        `Datos de ejemplo cargados (${range}).${cal}\n` +
+          `Tareas: ${c.chores ?? 0} · Pagos: ${c.payments ?? 0}\n` +
+          `Metas: ${c.goals ?? 0} · Ahorros: ${c.savings_goals ?? 0}\n` +
+          `Logros desbloqueados: ${c.achievements ?? 0}\n` +
+          `Tip: limpia antes si vas a regenerar. Revisa Calendario para el feed.`
+      );
     } catch (e: any) {
       Alert.alert('Error', e.response?.data?.detail || 'No se pudo generar demo');
     } finally {
@@ -913,13 +950,15 @@ export default function ProfileScreen() {
   const pendingCashNeeded = pendingWithdrawals.reduce((sum, w) => sum + Number(w.amount || 0), 0);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Perfil</Text>
-      </View>
-
+    <ParentScreenShell
+      title="Perfil"
+      subtitle={family ? `Familia ${family.name}` : 'Cuenta y configuración'}
+      showBack
+    >
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentInner}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -927,13 +966,17 @@ export default function ProfileScreen() {
               setRefreshing(true);
               loadData();
             }}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
       >
-        {/* User Info */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Image source={require('../../assets/images/padres.png')} style={styles.avatarImage} />
+            <Image
+              source={getParentAvatarSource(user?.gender)}
+              style={styles.avatarImage}
+            />
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{user?.name}</Text>
@@ -941,31 +984,71 @@ export default function ProfileScreen() {
             <View style={styles.roleBadge}>
               <Text style={styles.roleBadgeText}>{roleLabel(user?.family_role)}</Text>
             </View>
+            <View style={styles.parentGenderRow}>
+              <TouchableOpacity
+                style={[
+                  styles.parentGenderChip,
+                  user?.gender === 'hombre' && styles.parentGenderChipActive,
+                ]}
+                onPress={() => handleParentGender('hombre')}
+                disabled={savingGender}
+              >
+                <Text
+                  style={[
+                    styles.parentGenderChipText,
+                    user?.gender === 'hombre' && styles.parentGenderChipTextActive,
+                  ]}
+                >
+                  Padre
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.parentGenderChip,
+                  user?.gender === 'mujer' && styles.parentGenderChipActive,
+                ]}
+                onPress={() => handleParentGender('mujer')}
+                disabled={savingGender}
+              >
+                <Text
+                  style={[
+                    styles.parentGenderChipText,
+                    user?.gender === 'mujer' && styles.parentGenderChipTextActive,
+                  ]}
+                >
+                  Madre
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        {/* Family Info */}
         {family && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Familia</Text>
-              <TouchableOpacity onPress={() => setShowEditModal(true)}>
-                <Ionicons name="pencil" size={20} color={Colors.primary} />
+          <AccordionSection
+            title="Familia"
+            defaultOpen
+            headerRight={
+              <TouchableOpacity style={styles.editChip} onPress={() => setShowEditModal(true)}>
+                <Ionicons name="pencil" size={16} color={Colors.primary} />
+                <Text style={styles.editChipText}>Editar</Text>
               </TouchableOpacity>
-            </View>
+            }
+          >
             <View style={styles.cashReadyCard}>
-              <View style={styles.cashReadyHead}>
-                <Ionicons name="cash-outline" size={18} color={Colors.success} />
-                <Text style={styles.cashReadyTitle}>Dinero a tener listo</Text>
+              <View style={styles.cashReadyIconWrap}>
+                <Ionicons name="cash" size={20} color={Colors.success} />
               </View>
-              <Text style={styles.cashReadyAmount}>
-                {family.currency} {pendingCashNeeded.toFixed(2)}
-              </Text>
-              <Text style={styles.cashReadyHint}>
-                {pendingWithdrawals.length > 0
-                  ? `${pendingWithdrawals.length} retiro(s) pendientes por pagar`
-                  : 'No hay retiros pendientes ahora'}
-              </Text>
+              <View style={styles.cashReadyBody}>
+                <Text style={styles.cashReadyTitle}>Dinero a tener listo</Text>
+                <Text style={styles.cashReadyAmount}>
+                  {family.currency} {pendingCashNeeded.toFixed(2)}
+                </Text>
+                <Text style={styles.cashReadyHint}>
+                  {pendingWithdrawals.length > 0
+                    ? `${pendingWithdrawals.length} retiro(s) pendientes por pagar`
+                    : 'No hay retiros pendientes ahora'}
+                </Text>
+              </View>
             </View>
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
@@ -1131,20 +1214,23 @@ export default function ProfileScreen() {
                 ))}
               </View>
             )}
-          </View>
+          </AccordionSection>
         )}
 
         {family && pendingWithdrawals.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Solicitudes de retiro</Text>
+          <AccordionSection
+            title="Solicitudes de retiro"
+            count={pendingWithdrawals.length}
+            defaultOpen
+            headerRight={
               <TouchableOpacity
                 style={styles.bulkApproveBtn}
                 onPress={() => setBulkApproveModal({ maxAmount: '5', note: '' })}
               >
                 <Text style={styles.bulkApproveBtnText}>Aprobar peque. &lt; X</Text>
               </TouchableOpacity>
-            </View>
+            }
+          >
             {pendingWithdrawals.map((w) => (
               <View key={w.id} style={styles.withdrawalCard}>
                 <View style={{ flex: 1 }}>
@@ -1188,12 +1274,10 @@ export default function ProfileScreen() {
                 </View>
               </View>
             ))}
-          </View>
+          </AccordionSection>
         )}
 
-        {/* Recent Payments */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pagos Recientes</Text>
+        <AccordionSection title="Pagos recientes" count={payments.length} defaultOpen={false}>
           {payments.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>Aún no hay pagos realizados</Text>
@@ -1273,10 +1357,9 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ))
           )}
-        </View>
+        </AccordionSection>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Información legal</Text>
+        <AccordionSection title="Información legal" defaultOpen={false}>
           <View style={styles.legalCard}>
             <TouchableOpacity
               style={styles.legalMenuItem}
@@ -1311,11 +1394,9 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={18} color={Colors.textLight} />
             </TouchableOpacity>
           </View>
-        </View>
+        </AccordionSection>
 
-        {/* Logout Button */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Seguridad</Text>
+        <AccordionSection title="Seguridad" defaultOpen>
           <View style={styles.legalCard}>
             <TouchableOpacity
               style={styles.legalMenuItem}
@@ -1384,10 +1465,9 @@ export default function ProfileScreen() {
               </View>
             ) : null}
           </View>
-        </View>
+        </AccordionSection>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Administración</Text>
+        <AccordionSection title="Administración" defaultOpen={false}>
           <View style={styles.dangerCard}>
             <Text style={styles.dangerTitle}>Resetear datos de actividad</Text>
             <Text style={styles.dangerHint}>
@@ -1472,15 +1552,17 @@ export default function ProfileScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </AccordionSection>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Diagnóstico</Text>
+        <AccordionSection
+          title="Diagnóstico"
+          defaultOpen={false}
+          headerRight={
             <TouchableOpacity onPress={refreshDiagnostics} disabled={loadingDiagnostics}>
               <Ionicons name="refresh-outline" size={18} color={Colors.primary} />
             </TouchableOpacity>
-          </View>
+          }
+        >
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>API</Text>
@@ -1507,10 +1589,9 @@ export default function ProfileScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </AccordionSection>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Bitácora reciente</Text>
+        <AccordionSection title="Bitácora reciente" count={auditRows.length} defaultOpen={false}>
           <View style={styles.legalCard}>
             {auditRows.length === 0 ? (
               <Text style={{ padding: 14, color: Colors.textSecondary, fontSize: 13 }}>
@@ -1536,7 +1617,7 @@ export default function ProfileScreen() {
               ))
             )}
           </View>
-        </View>
+        </AccordionSection>
 
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={20} color={Colors.error} />
@@ -1545,670 +1626,89 @@ export default function ProfileScreen() {
       </ScrollView>
 
       {/* Edit Family Modal */}
-      <Modal
+      <AppModal
         visible={showEditModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowEditModal(false)}
+        onClose={() => setShowEditModal(false)}
+        title="Editar Familia"
+        icon="home-outline"
+        iconTone="primary"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowEditModal(false)}
+            confirmLabel="Guardar"
+            onConfirm={handleUpdateFamily}
+            confirming={saving}
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              showsVerticalScrollIndicator
-              style={[
-                styles.modalScroll,
-                { maxHeight: Math.min(windowHeight * 0.74, 640) },
-              ]}
-              contentContainerStyle={styles.modalScrollContent}
-            >
-              <Text style={styles.modalTitle}>Editar Familia</Text>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Nombre de la Familia</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Nombre de la familia"
-                  placeholderTextColor={Colors.textLight}
-                  value={familyName}
-                  onChangeText={setFamilyName}
-                />
-              </View>
-
-              <FamilyLocaleSection
-                countryCode={familyCountryCode}
-                currency={familyCurrency}
-                onCountryChange={setFamilyCountryCode}
-                onCurrencyChange={setFamilyCurrency}
-              />
-              <TouchableOpacity style={styles.recommendBtn} onPress={applyEcuadorRecommendedValues}>
-                <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
-                <Text style={styles.recommendBtnText}>Valores recomendados Ecuador</Text>
-              </TouchableOpacity>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Match por ahorro (%)</Text>
-                <Text style={styles.inputHint}>Ejemplo: 10% o 20% de match por ahorro semanal.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 20"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={matchPercent}
-                  onChangeText={setMatchPercent}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '5', '10', '20'].map((v) => (
-                    <TouchableOpacity
-                      key={`match-${v}`}
-                      style={[styles.pickChip, matchPercent === v && styles.pickChipActive]}
-                      onPress={() => setMatchPercent(v)}
-                    >
-                      <Text style={[styles.pickChipText, matchPercent === v && styles.pickChipTextActive]}>
-                        {v}%
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Tope semanal por hijo</Text>
-                <Text style={styles.inputHint}>Monto máximo del match en una semana.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 50"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={matchWeeklyCap}
-                  onChangeText={setMatchWeeklyCap}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '5', '10', '20'].map((v) => (
-                    <TouchableOpacity
-                      key={`weekly-cap-${v}`}
-                      style={[styles.pickChip, matchWeeklyCap === v && styles.pickChipActive]}
-                      onPress={() => setMatchWeeklyCap(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, matchWeeklyCap === v && styles.pickChipTextActive]}
-                      >
-                        {v}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Reto familiar mensual (%)</Text>
-                <Text style={styles.inputHint}>Meta de ahorro familiar por mes.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 15"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={familyChallengePercent}
-                  onChangeText={setFamilyChallengePercent}
-                />
-                <View style={styles.pickRow}>
-                  {['10', '15', '20', '25'].map((v) => (
-                    <TouchableOpacity
-                      key={`challenge-${v}`}
-                      style={[styles.pickChip, familyChallengePercent === v && styles.pickChipActive]}
-                      onPress={() => setFamilyChallengePercent(v)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickChipText,
-                          familyChallengePercent === v && styles.pickChipTextActive,
-                        ]}
-                      >
-                        {v}%
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Bono por racha (cada 4 semanas)</Text>
-                <Text style={styles.inputHint}>Bono extra por constancia de ahorro.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 5"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={streakBonusAmount}
-                  onChangeText={setStreakBonusAmount}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '1', '2', '5'].map((v) => (
-                    <TouchableOpacity
-                      key={`streak-${v}`}
-                      style={[styles.pickChip, streakBonusAmount === v && styles.pickChipActive]}
-                      onPress={() => setStreakBonusAmount(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, streakBonusAmount === v && styles.pickChipTextActive]}
-                      >
-                        {v}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Retiro mínimo permitido</Text>
-                <Text style={styles.inputHint}>Si pones 0, no habrá mínimo.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 1"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={minWithdrawalAmount}
-                  onChangeText={setMinWithdrawalAmount}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '1', '2', '5'].map((v) => (
-                    <TouchableOpacity
-                      key={`min-w-${v}`}
-                      style={[styles.pickChip, minWithdrawalAmount === v && styles.pickChipActive]}
-                      onPress={() => setMinWithdrawalAmount(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, minWithdrawalAmount === v && styles.pickChipTextActive]}
-                      >
-                        {v}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Retiro máximo permitido (0 = sin límite)</Text>
-                <Text style={styles.inputHint}>Límite por solicitud de retiro.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 20"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={maxWithdrawalAmount}
-                  onChangeText={setMaxWithdrawalAmount}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '10', '20', '30'].map((v) => (
-                    <TouchableOpacity
-                      key={`max-w-${v}`}
-                      style={[styles.pickChip, maxWithdrawalAmount === v && styles.pickChipActive]}
-                      onPress={() => setMaxWithdrawalAmount(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, maxWithdrawalAmount === v && styles.pickChipTextActive]}
-                      >
-                        {v === '0' ? 'Sin límite' : v}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Máximo diario por hijo (0 = sin límite)</Text>
-                <Text style={styles.inputHint}>Control total diario de retiros por hijo.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 30"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  value={maxDailyWithdrawalPerChild}
-                  onChangeText={setMaxDailyWithdrawalPerChild}
-                />
-                <View style={styles.pickRow}>
-                  {['0', '10', '20', '30'].map((v) => (
-                    <TouchableOpacity
-                      key={`daily-w-${v}`}
-                      style={[styles.pickChip, maxDailyWithdrawalPerChild === v && styles.pickChipActive]}
-                      onPress={() => setMaxDailyWithdrawalPerChild(v)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickChipText,
-                          maxDailyWithdrawalPerChild === v && styles.pickChipTextActive,
-                        ]}
-                      >
-                        {v === '0' ? 'Sin límite' : v}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Horas silenciosas alertas</Text>
-                <Text style={styles.inputHint}>Selecciona hora de inicio y fin (solo hora).</Text>
-                <View style={styles.inlineRow}>
-                  <TouchableOpacity
-                    style={[styles.textInput, styles.inlineInput, styles.timeFieldButton]}
-                    onPress={() => openQuietHourPicker('start')}
-                  >
-                    <Text style={quietHoursStart !== '' ? styles.timeFieldValue : styles.timeFieldPlaceholder}>
-                      {hourText(quietHoursStart, 'Inicio')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.textInput, styles.inlineInput, styles.timeFieldButton]}
-                    onPress={() => openQuietHourPicker('end')}
-                  >
-                    <Text style={quietHoursEnd !== '' ? styles.timeFieldValue : styles.timeFieldPlaceholder}>
-                      {hourText(quietHoursEnd, 'Fin')}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.pickRow}>
-                  {[
-                    { id: 'night', label: '22:00-06:00', start: '22', end: '6' },
-                    { id: 'late', label: '23:00-07:00', start: '23', end: '7' },
-                    { id: 'school', label: '21:00-06:00', start: '21', end: '6' },
-                    { id: 'off', label: 'Sin horario', start: '', end: '' },
-                  ].map((preset) => {
-                    const isActive = quietHoursStart === preset.start && quietHoursEnd === preset.end;
-                    return (
-                      <TouchableOpacity
-                        key={preset.id}
-                        style={[styles.pickChip, isActive && styles.pickChipActive]}
-                        onPress={() => {
-                          setQuietHoursStart(preset.start);
-                          setQuietHoursEnd(preset.end);
-                        }}
-                      >
-                        <Text style={[styles.pickChipText, isActive && styles.pickChipTextActive]}>
-                          {preset.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-              {quietPickerVisible ? (
-                <DateTimePicker
-                  value={toHourDate(quietPickerTarget === 'start' ? quietHoursStart : quietHoursEnd)}
-                  mode="time"
-                  is24Hour
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={onQuietHourChange}
-                />
-              ) : null}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Alertas para padres</Text>
-                <View style={styles.booleanRow}>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, notificationsParentsEnabled && styles.booleanChipOn]}
-                    onPress={() => setNotificationsParentsEnabled(true)}
-                  >
-                    <Text
-                      style={[styles.booleanChipText, notificationsParentsEnabled && styles.booleanChipTextOn]}
-                    >
-                      Activas
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, !notificationsParentsEnabled && styles.booleanChipOn]}
-                    onPress={() => setNotificationsParentsEnabled(false)}
-                  >
-                    <Text
-                      style={[styles.booleanChipText, !notificationsParentsEnabled && styles.booleanChipTextOn]}
-                    >
-                      Silenciadas
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Alertas para hijos</Text>
-                <View style={styles.booleanRow}>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, notificationsChildrenEnabled && styles.booleanChipOn]}
-                    onPress={() => setNotificationsChildrenEnabled(true)}
-                  >
-                    <Text
-                      style={[styles.booleanChipText, notificationsChildrenEnabled && styles.booleanChipTextOn]}
-                    >
-                      Activas
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, !notificationsChildrenEnabled && styles.booleanChipOn]}
-                    onPress={() => setNotificationsChildrenEnabled(false)}
-                  >
-                    <Text
-                      style={[styles.booleanChipText, !notificationsChildrenEnabled && styles.booleanChipTextOn]}
-                    >
-                      Silenciadas
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Demo mode</Text>
-                <View style={styles.booleanRow}>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, demoModeEnabled && styles.booleanChipOn]}
-                    onPress={() => setDemoModeEnabled(true)}
-                  >
-                    <Text style={[styles.booleanChipText, demoModeEnabled && styles.booleanChipTextOn]}>
-                      Activo
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.booleanChip, !demoModeEnabled && styles.booleanChipOn]}
-                    onPress={() => setDemoModeEnabled(false)}
-                  >
-                    <Text style={[styles.booleanChipText, !demoModeEnabled && styles.booleanChipTextOn]}>
-                      Inactivo
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Auto logout (minutos, 0=off)</Text>
-                <View style={styles.booleanRow}>
-                  {[0, 15, 30, 60].map((n) => (
-                    <TouchableOpacity
-                      key={n}
-                      style={[styles.booleanChip, Number(autoLogoutMinutes) === n && styles.booleanChipOn]}
-                      onPress={() => setAutoLogoutMinutes(String(n))}
-                    >
-                      <Text
-                        style={[
-                          styles.booleanChipText,
-                          Number(autoLogoutMinutes) === n && styles.booleanChipTextOn,
-                        ]}
-                      >
-                        {n === 0 ? 'Off' : `${n}m`}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <TextInput
-                  style={[styles.textInput, { marginTop: 8 }]}
-                  placeholder="Ej. 20"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="number-pad"
-                  value={autoLogoutMinutes}
-                  onChangeText={setAutoLogoutMinutes}
-                />
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Máximo intentos PIN fallidos (3-10)</Text>
-                <Text style={styles.inputHint}>Después se bloquea temporalmente.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 5"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="number-pad"
-                  value={pinFailedAttemptLimit}
-                  onChangeText={setPinFailedAttemptLimit}
-                />
-                <View style={styles.pickRow}>
-                  {['3', '5', '7', '10'].map((v) => (
-                    <TouchableOpacity
-                      key={`pin-limit-${v}`}
-                      style={[styles.pickChip, pinFailedAttemptLimit === v && styles.pickChipActive]}
-                      onPress={() => setPinFailedAttemptLimit(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, pinFailedAttemptLimit === v && styles.pickChipTextActive]}
-                      >
-                        {v} intentos
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Bloqueo PIN (minutos, 1-120)</Text>
-                <Text style={styles.inputHint}>Tiempo de bloqueo tras superar intentos.</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej. 15"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="number-pad"
-                  value={pinLockoutMinutes}
-                  onChangeText={setPinLockoutMinutes}
-                />
-                <View style={styles.pickRow}>
-                  {['5', '15', '30', '60'].map((v) => (
-                    <TouchableOpacity
-                      key={`pin-lock-${v}`}
-                      style={[styles.pickChip, pinLockoutMinutes === v && styles.pickChipActive]}
-                      onPress={() => setPinLockoutMinutes(v)}
-                    >
-                      <Text
-                        style={[styles.pickChipText, pinLockoutMinutes === v && styles.pickChipTextActive]}
-                      >
-                        {v} min
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Permiso mínimo para resetear actividad</Text>
-                <View style={styles.pickRow}>
-                  {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
-                    <TouchableOpacity
-                      key={`reset-${r}`}
-                      style={[styles.pickChip, resetRoleMin === r && styles.pickChipActive]}
-                      onPress={() => setResetRoleMin(r)}
-                    >
-                      <Text style={[styles.pickChipText, resetRoleMin === r && styles.pickChipTextActive]}>
-                        {r}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Permiso mínimo para aprobar retiros</Text>
-                <View style={styles.pickRow}>
-                  {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
-                    <TouchableOpacity
-                      key={`withdraw-${r}`}
-                      style={[styles.pickChip, approveWithdrawalRoleMin === r && styles.pickChipActive]}
-                      onPress={() => setApproveWithdrawalRoleMin(r)}
-                    >
-                      <Text
-                        style={[
-                          styles.pickChipText,
-                          approveWithdrawalRoleMin === r && styles.pickChipTextActive,
-                        ]}
-                      >
-                        {r}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Permiso mínimo para editar metas</Text>
-                <View style={styles.pickRow}>
-                  {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
-                    <TouchableOpacity
-                      key={`goals-${r}`}
-                      style={[styles.pickChip, editGoalsRoleMin === r && styles.pickChipActive]}
-                      onPress={() => setEditGoalsRoleMin(r)}
-                    >
-                      <Text style={[styles.pickChipText, editGoalsRoleMin === r && styles.pickChipTextActive]}>
-                        {r}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowEditModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.buttonDisabled]}
-                onPress={handleUpdateFamily}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!purposeModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setPurposeModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Nota de uso del dinero</Text>
-            <Text style={styles.modalHint}>
-              Opcional: para qué usaron o usarán este dinero (aprende hábitos financieros).
-            </Text>
-            <TextInput
-              style={[styles.textInput, { minHeight: 100 }]}
-              placeholder="Ej.: guardé para un videojuego"
-              placeholderTextColor={Colors.textLight}
-              value={purposeModal?.note ?? ''}
-              onChangeText={(note) => purposeModal && setPurposeModal({ ...purposeModal, note })}
-              multiline
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setPurposeModal(null)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, savingPurpose && styles.buttonDisabled]}
-                onPress={savePurpose}
-                disabled={savingPurpose}
-              >
-                {savingPurpose ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!withdrawApprove}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setWithdrawApprove(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Aprobar retiro</Text>
-            {withdrawApprove ? (
-              <View style={styles.withdrawSummaryBox}>
-                <Text style={styles.withdrawSummaryMain}>
-                  {withdrawApprove.childName} · {family?.currency} {withdrawApprove.amount.toFixed(2)}
-                </Text>
-                {withdrawApprove.purposeType ? (
-                  <Text style={styles.withdrawSummaryMeta}>
-                    Tipo: {withdrawApprove.purposeType === 'necesidad' ? 'Necesidad' : 'Deseo'}
-                  </Text>
-                ) : null}
-                {withdrawApprove.goalImpactNote ? (
-                  <Text style={styles.withdrawSummaryMeta}>Meta: {withdrawApprove.goalImpactNote}</Text>
-                ) : null}
-              </View>
-            ) : null}
-            <Text style={styles.modalHint}>Nota interna (opcional) sobre el pago en efectivo.</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Ej.: pagado en efectivo el sábado"
-              placeholderTextColor={Colors.textLight}
-              value={withdrawApprove?.note ?? ''}
-              onChangeText={(note) =>
-                withdrawApprove && setWithdrawApprove({ ...withdrawApprove, note })
-              }
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setWithdrawApprove(null)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, resolvingWithdrawal && styles.buttonDisabled]}
-                onPress={confirmApproveWithdrawal}
-                disabled={resolvingWithdrawal}
-              >
-                {resolvingWithdrawal ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Confirmar pago</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!bulkApproveModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setBulkApproveModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Aprobar retiros pequeños</Text>
-            <Text style={styles.modalHint}>
-              Se aprobarán todos los pendientes con monto menor o igual a este valor.
-            </Text>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Monto máximo (X)</Text>
+              <Text style={styles.inputLabel}>Nombre de la Familia</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ej. 5"
+                placeholder="Nombre de la familia"
+                placeholderTextColor={Colors.textLight}
+                value={familyName}
+                onChangeText={setFamilyName}
+              />
+            </View>
+
+            <FamilyLocaleSection
+              countryCode={familyCountryCode}
+              currency={familyCurrency}
+              onCountryChange={setFamilyCountryCode}
+              onCurrencyChange={setFamilyCurrency}
+            />
+            <TouchableOpacity style={styles.recommendBtn} onPress={applyEcuadorRecommendedValues}>
+              <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
+              <Text style={styles.recommendBtnText}>Valores recomendados Ecuador</Text>
+            </TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Match por ahorro (%)</Text>
+              <Text style={styles.inputHint}>Ejemplo: 10% o 20% de match por ahorro semanal.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 20"
                 placeholderTextColor={Colors.textLight}
                 keyboardType="decimal-pad"
-                value={bulkApproveModal?.maxAmount ?? ''}
-                onChangeText={(maxAmount) =>
-                  bulkApproveModal && setBulkApproveModal({ ...bulkApproveModal, maxAmount })
-                }
+                value={matchPercent}
+                onChangeText={setMatchPercent}
               />
-              <View style={styles.quickMaxRow}>
-                {[2, 5, 10].map((v) => (
+              <View style={styles.pickRow}>
+                {['0', '5', '10', '20'].map((v) => (
                   <TouchableOpacity
-                    key={v}
-                    style={[
-                      styles.quickMaxChip,
-                      Number((bulkApproveModal?.maxAmount ?? '').replace(',', '.')) === v &&
-                        styles.quickMaxChipActive,
-                    ]}
-                    onPress={() =>
-                      bulkApproveModal &&
-                      setBulkApproveModal({ ...bulkApproveModal, maxAmount: String(v) })
-                    }
+                    key={`match-${v}`}
+                    style={[styles.pickChip, matchPercent === v && styles.pickChipActive]}
+                    onPress={() => setMatchPercent(v)}
+                  >
+                    <Text style={[styles.pickChipText, matchPercent === v && styles.pickChipTextActive]}>
+                      {v}%
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Tope semanal por hijo</Text>
+              <Text style={styles.inputHint}>Monto máximo del match en una semana.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 50"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="decimal-pad"
+                value={matchWeeklyCap}
+                onChangeText={setMatchWeeklyCap}
+              />
+              <View style={styles.pickRow}>
+                {['0', '5', '10', '20'].map((v) => (
+                  <TouchableOpacity
+                    key={`weekly-cap-${v}`}
+                    style={[styles.pickChip, matchWeeklyCap === v && styles.pickChipActive]}
+                    onPress={() => setMatchWeeklyCap(v)}
                   >
                     <Text
-                      style={[
-                        styles.quickMaxChipText,
-                        Number((bulkApproveModal?.maxAmount ?? '').replace(',', '.')) === v &&
-                          styles.quickMaxChipTextActive,
-                      ]}
+                      style={[styles.pickChipText, matchWeeklyCap === v && styles.pickChipTextActive]}
                     >
-                      {'<= '}
                       {v}
                     </Text>
                   </TouchableOpacity>
@@ -2216,269 +1716,749 @@ export default function ProfileScreen() {
               </View>
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Nota interna (opcional)</Text>
+              <Text style={styles.inputLabel}>Reto familiar mensual (%)</Text>
+              <Text style={styles.inputHint}>Meta de ahorro familiar por mes.</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ej.: pago en efectivo hoy"
+                placeholder="Ej. 15"
                 placeholderTextColor={Colors.textLight}
-                value={bulkApproveModal?.note ?? ''}
-                onChangeText={(note) =>
-                  bulkApproveModal && setBulkApproveModal({ ...bulkApproveModal, note })
-                }
+                keyboardType="decimal-pad"
+                value={familyChallengePercent}
+                onChangeText={setFamilyChallengePercent}
               />
-            </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setBulkApproveModal(null)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, bulkApproving && styles.buttonDisabled]}
-                onPress={confirmBulkApproveSmall}
-                disabled={bulkApproving}
-              >
-                {bulkApproving ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Aprobar lote</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!passwordModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setPasswordModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Cambiar contraseña</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Contraseña actual</Text>
-              <TextInput
-                style={styles.textInput}
-                secureTextEntry
-                value={passwordModal?.currentPassword ?? ''}
-                onChangeText={(currentPassword) =>
-                  passwordModal && setPasswordModal({ ...passwordModal, currentPassword })
-                }
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Nueva contraseña</Text>
-              <TextInput
-                style={styles.textInput}
-                secureTextEntry
-                value={passwordModal?.newPassword ?? ''}
-                onChangeText={(newPassword) =>
-                  passwordModal && setPasswordModal({ ...passwordModal, newPassword })
-                }
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirmar nueva contraseña</Text>
-              <TextInput
-                style={styles.textInput}
-                secureTextEntry
-                value={passwordModal?.confirmPassword ?? ''}
-                onChangeText={(confirmPassword) =>
-                  passwordModal && setPasswordModal({ ...passwordModal, confirmPassword })
-                }
-              />
-            </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setPasswordModal(null)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, changingPassword && styles.buttonDisabled]}
-                disabled={changingPassword}
-                onPress={submitChangePassword}
-              >
-                {changingPassword ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!childPinModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setChildPinModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Cambiar PIN de hijo</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Hijo</Text>
               <View style={styles.pickRow}>
-                {children.map((c) => (
+                {['10', '15', '20', '25'].map((v) => (
                   <TouchableOpacity
-                    key={c.id}
-                    style={[styles.pickChip, childPinModal?.childId === c.id && styles.pickChipActive]}
-                    onPress={() => childPinModal && setChildPinModal({ ...childPinModal, childId: c.id })}
+                    key={`challenge-${v}`}
+                    style={[styles.pickChip, familyChallengePercent === v && styles.pickChipActive]}
+                    onPress={() => setFamilyChallengePercent(v)}
                   >
                     <Text
                       style={[
                         styles.pickChipText,
-                        childPinModal?.childId === c.id && styles.pickChipTextActive,
+                        familyChallengePercent === v && styles.pickChipTextActive,
                       ]}
                     >
-                      {c.name}
+                      {v}%
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Nuevo PIN</Text>
+              <Text style={styles.inputLabel}>Bono por racha (cada 4 semanas)</Text>
+              <Text style={styles.inputHint}>Bono extra por constancia de ahorro.</Text>
               <TextInput
                 style={styles.textInput}
-                value={childPinModal?.newPin ?? ''}
-                onChangeText={(newPin) => childPinModal && setChildPinModal({ ...childPinModal, newPin })}
-                secureTextEntry
+                placeholder="Ej. 5"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="decimal-pad"
+                value={streakBonusAmount}
+                onChangeText={setStreakBonusAmount}
+              />
+              <View style={styles.pickRow}>
+                {['0', '1', '2', '5'].map((v) => (
+                  <TouchableOpacity
+                    key={`streak-${v}`}
+                    style={[styles.pickChip, streakBonusAmount === v && styles.pickChipActive]}
+                    onPress={() => setStreakBonusAmount(v)}
+                  >
+                    <Text
+                      style={[styles.pickChipText, streakBonusAmount === v && styles.pickChipTextActive]}
+                    >
+                      {v}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Retiro mínimo permitido</Text>
+              <Text style={styles.inputHint}>Si pones 0, no habrá mínimo.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 1"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="decimal-pad"
+                value={minWithdrawalAmount}
+                onChangeText={setMinWithdrawalAmount}
+              />
+              <View style={styles.pickRow}>
+                {['0', '1', '2', '5'].map((v) => (
+                  <TouchableOpacity
+                    key={`min-w-${v}`}
+                    style={[styles.pickChip, minWithdrawalAmount === v && styles.pickChipActive]}
+                    onPress={() => setMinWithdrawalAmount(v)}
+                  >
+                    <Text
+                      style={[styles.pickChipText, minWithdrawalAmount === v && styles.pickChipTextActive]}
+                    >
+                      {v}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Retiro máximo permitido (0 = sin límite)</Text>
+              <Text style={styles.inputHint}>Límite por solicitud de retiro.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 20"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="decimal-pad"
+                value={maxWithdrawalAmount}
+                onChangeText={setMaxWithdrawalAmount}
+              />
+              <View style={styles.pickRow}>
+                {['0', '10', '20', '30'].map((v) => (
+                  <TouchableOpacity
+                    key={`max-w-${v}`}
+                    style={[styles.pickChip, maxWithdrawalAmount === v && styles.pickChipActive]}
+                    onPress={() => setMaxWithdrawalAmount(v)}
+                  >
+                    <Text
+                      style={[styles.pickChipText, maxWithdrawalAmount === v && styles.pickChipTextActive]}
+                    >
+                      {v === '0' ? 'Sin límite' : v}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Máximo diario por hijo (0 = sin límite)</Text>
+              <Text style={styles.inputHint}>Control total diario de retiros por hijo.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 30"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="decimal-pad"
+                value={maxDailyWithdrawalPerChild}
+                onChangeText={setMaxDailyWithdrawalPerChild}
+              />
+              <View style={styles.pickRow}>
+                {['0', '10', '20', '30'].map((v) => (
+                  <TouchableOpacity
+                    key={`daily-w-${v}`}
+                    style={[styles.pickChip, maxDailyWithdrawalPerChild === v && styles.pickChipActive]}
+                    onPress={() => setMaxDailyWithdrawalPerChild(v)}
+                  >
+                    <Text
+                      style={[
+                        styles.pickChipText,
+                        maxDailyWithdrawalPerChild === v && styles.pickChipTextActive,
+                      ]}
+                    >
+                      {v === '0' ? 'Sin límite' : v}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Horas silenciosas alertas</Text>
+              <Text style={styles.inputHint}>Selecciona hora de inicio y fin (solo hora).</Text>
+              <View style={styles.inlineRow}>
+                <TouchableOpacity
+                  style={[styles.textInput, styles.inlineInput, styles.timeFieldButton]}
+                  onPress={() => openQuietHourPicker('start')}
+                >
+                  <Text style={quietHoursStart !== '' ? styles.timeFieldValue : styles.timeFieldPlaceholder}>
+                    {hourText(quietHoursStart, 'Inicio')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.textInput, styles.inlineInput, styles.timeFieldButton]}
+                  onPress={() => openQuietHourPicker('end')}
+                >
+                  <Text style={quietHoursEnd !== '' ? styles.timeFieldValue : styles.timeFieldPlaceholder}>
+                    {hourText(quietHoursEnd, 'Fin')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.pickRow}>
+                {[
+                  { id: 'night', label: '22:00-06:00', start: '22', end: '6' },
+                  { id: 'late', label: '23:00-07:00', start: '23', end: '7' },
+                  { id: 'school', label: '21:00-06:00', start: '21', end: '6' },
+                  { id: 'off', label: 'Sin horario', start: '', end: '' },
+                ].map((preset) => {
+                  const isActive = quietHoursStart === preset.start && quietHoursEnd === preset.end;
+                  return (
+                    <TouchableOpacity
+                      key={preset.id}
+                      style={[styles.pickChip, isActive && styles.pickChipActive]}
+                      onPress={() => {
+                        setQuietHoursStart(preset.start);
+                        setQuietHoursEnd(preset.end);
+                      }}
+                    >
+                      <Text style={[styles.pickChipText, isActive && styles.pickChipTextActive]}>
+                        {preset.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+            {quietPickerVisible ? (
+              <DateTimePicker
+                value={toHourDate(quietPickerTarget === 'start' ? quietHoursStart : quietHoursEnd)}
+                mode="time"
+                is24Hour
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onQuietHourChange}
+              />
+            ) : null}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Alertas para padres</Text>
+              <View style={styles.booleanRow}>
+                <TouchableOpacity
+                  style={[styles.booleanChip, notificationsParentsEnabled && styles.booleanChipOn]}
+                  onPress={() => setNotificationsParentsEnabled(true)}
+                >
+                  <Text
+                    style={[styles.booleanChipText, notificationsParentsEnabled && styles.booleanChipTextOn]}
+                  >
+                    Activas
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.booleanChip, !notificationsParentsEnabled && styles.booleanChipOn]}
+                  onPress={() => setNotificationsParentsEnabled(false)}
+                >
+                  <Text
+                    style={[styles.booleanChipText, !notificationsParentsEnabled && styles.booleanChipTextOn]}
+                  >
+                    Silenciadas
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Alertas para hijos</Text>
+              <View style={styles.booleanRow}>
+                <TouchableOpacity
+                  style={[styles.booleanChip, notificationsChildrenEnabled && styles.booleanChipOn]}
+                  onPress={() => setNotificationsChildrenEnabled(true)}
+                >
+                  <Text
+                    style={[styles.booleanChipText, notificationsChildrenEnabled && styles.booleanChipTextOn]}
+                  >
+                    Activas
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.booleanChip, !notificationsChildrenEnabled && styles.booleanChipOn]}
+                  onPress={() => setNotificationsChildrenEnabled(false)}
+                >
+                  <Text
+                    style={[styles.booleanChipText, !notificationsChildrenEnabled && styles.booleanChipTextOn]}
+                  >
+                    Silenciadas
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Demo mode</Text>
+              <View style={styles.booleanRow}>
+                <TouchableOpacity
+                  style={[styles.booleanChip, demoModeEnabled && styles.booleanChipOn]}
+                  onPress={() => setDemoModeEnabled(true)}
+                >
+                  <Text style={[styles.booleanChipText, demoModeEnabled && styles.booleanChipTextOn]}>
+                    Activo
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.booleanChip, !demoModeEnabled && styles.booleanChipOn]}
+                  onPress={() => setDemoModeEnabled(false)}
+                >
+                  <Text style={[styles.booleanChipText, !demoModeEnabled && styles.booleanChipTextOn]}>
+                    Inactivo
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Auto logout (minutos, 0=off)</Text>
+              <View style={styles.booleanRow}>
+                {[0, 15, 30, 60].map((n) => (
+                  <TouchableOpacity
+                    key={n}
+                    style={[styles.booleanChip, Number(autoLogoutMinutes) === n && styles.booleanChipOn]}
+                    onPress={() => setAutoLogoutMinutes(String(n))}
+                  >
+                    <Text
+                      style={[
+                        styles.booleanChipText,
+                        Number(autoLogoutMinutes) === n && styles.booleanChipTextOn,
+                      ]}
+                    >
+                      {n === 0 ? 'Off' : `${n}m`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput
+                style={[styles.textInput, { marginTop: 8 }]}
+                placeholder="Ej. 20"
+                placeholderTextColor={Colors.textLight}
                 keyboardType="number-pad"
-                maxLength={12}
+                value={autoLogoutMinutes}
+                onChangeText={setAutoLogoutMinutes}
               />
             </View>
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirmar PIN</Text>
+              <Text style={styles.inputLabel}>Máximo intentos PIN fallidos (3-10)</Text>
+              <Text style={styles.inputHint}>Después se bloquea temporalmente.</Text>
               <TextInput
                 style={styles.textInput}
-                value={childPinModal?.confirmPin ?? ''}
-                onChangeText={(confirmPin) =>
-                  childPinModal && setChildPinModal({ ...childPinModal, confirmPin })
-                }
-                secureTextEntry
+                placeholder="Ej. 5"
+                placeholderTextColor={Colors.textLight}
                 keyboardType="number-pad"
-                maxLength={12}
+                value={pinFailedAttemptLimit}
+                onChangeText={setPinFailedAttemptLimit}
               />
-            </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setChildPinModal(null)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, changingChildPin && styles.buttonDisabled]}
-                disabled={changingChildPin}
-                onPress={submitChangeChildPin}
-              >
-                {changingChildPin ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Guardar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!restorePreview}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setRestorePreview(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Vista previa de restauración</Text>
-            <Text style={styles.modalHint}>
-              {restorePreview?.family_matches
-                ? 'La familia del respaldo coincide.'
-                : 'ATENCION: el respaldo parece de otra familia.'}
-            </Text>
-            <View style={styles.legalCard}>
-              {[
-                ['Tareas', 'chores'],
-                ['Pagos', 'payments'],
-                ['Metas', 'goals'],
-                ['Metas ahorro', 'savings_goals'],
-                ['Retiros', 'withdrawals'],
-                ['Logros', 'achievements'],
-                ['Alertas', 'notifications'],
-              ].map(([label, key]) => (
-                <View key={key} style={styles.legalMenuItem}>
-                  <Text style={styles.legalMenuText}>{label}</Text>
-                  <Text style={styles.infoValue}>
-                    {Number(restorePreview?.backup_counts?.[key] || 0)} /{' '}
-                    {Number(restorePreview?.current_counts?.[key] || 0)}
-                  </Text>
-                </View>
-              ))}
-              <View style={[styles.legalMenuItem, styles.legalMenuItemLast]}>
-                <Text style={[styles.paymentDate, { flex: 1 }]}>
-                  Formato: respaldo / actual. Si aplicas, se reemplaza la actividad actual.
-                </Text>
+              <View style={styles.pickRow}>
+                {['3', '5', '7', '10'].map((v) => (
+                  <TouchableOpacity
+                    key={`pin-limit-${v}`}
+                    style={[styles.pickChip, pinFailedAttemptLimit === v && styles.pickChipActive]}
+                    onPress={() => setPinFailedAttemptLimit(v)}
+                  >
+                    <Text
+                      style={[styles.pickChipText, pinFailedAttemptLimit === v && styles.pickChipTextActive]}
+                    >
+                      {v} intentos
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setRestorePreview(null)}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, (!restorePreview?.family_matches || restoringBackup) && styles.buttonDisabled]}
-                onPress={applyRestoreFromPreview}
-                disabled={!restorePreview?.family_matches || restoringBackup}
-              >
-                {restoringBackup ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Aplicar restauración</Text>
-                )}
-              </TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Bloqueo PIN (minutos, 1-120)</Text>
+              <Text style={styles.inputHint}>Tiempo de bloqueo tras superar intentos.</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej. 15"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="number-pad"
+                value={pinLockoutMinutes}
+                onChangeText={setPinLockoutMinutes}
+              />
+              <View style={styles.pickRow}>
+                {['5', '15', '30', '60'].map((v) => (
+                  <TouchableOpacity
+                    key={`pin-lock-${v}`}
+                    style={[styles.pickChip, pinLockoutMinutes === v && styles.pickChipActive]}
+                    onPress={() => setPinLockoutMinutes(v)}
+                  >
+                    <Text
+                      style={[styles.pickChipText, pinLockoutMinutes === v && styles.pickChipTextActive]}
+                    >
+                      {v} min
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Permiso mínimo para resetear actividad</Text>
+              <View style={styles.pickRow}>
+                {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
+                  <TouchableOpacity
+                    key={`reset-${r}`}
+                    style={[styles.pickChip, resetRoleMin === r && styles.pickChipActive]}
+                    onPress={() => setResetRoleMin(r)}
+                  >
+                    <Text style={[styles.pickChipText, resetRoleMin === r && styles.pickChipTextActive]}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Permiso mínimo para aprobar retiros</Text>
+              <View style={styles.pickRow}>
+                {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
+                  <TouchableOpacity
+                    key={`withdraw-${r}`}
+                    style={[styles.pickChip, approveWithdrawalRoleMin === r && styles.pickChipActive]}
+                    onPress={() => setApproveWithdrawalRoleMin(r)}
+                  >
+                    <Text
+                      style={[
+                        styles.pickChipText,
+                        approveWithdrawalRoleMin === r && styles.pickChipTextActive,
+                      ]}
+                    >
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Permiso mínimo para editar metas</Text>
+              <View style={styles.pickRow}>
+                {(['owner', 'admin', 'parent'] as FamilyRole[]).map((r) => (
+                  <TouchableOpacity
+                    key={`goals-${r}`}
+                    style={[styles.pickChip, editGoalsRoleMin === r && styles.pickChipActive]}
+                    onPress={() => setEditGoalsRoleMin(r)}
+                  >
+                    <Text style={[styles.pickChipText, editGoalsRoleMin === r && styles.pickChipTextActive]}>
+                      {r}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+      </AppModal>
+
+      <AppModal
+        visible={!!purposeModal}
+        onClose={() => setPurposeModal(null)}
+        title="Nota de uso del dinero"
+        subtitle="Opcional: para qué usaron o usarán este dinero (aprende hábitos financieros)."
+        icon="wallet-outline"
+        iconTone="secondary"
+        footer={
+          <AppModalActions
+            onCancel={() => setPurposeModal(null)}
+            confirmLabel="Guardar"
+            onConfirm={savePurpose}
+            confirming={savingPurpose}
+          />
+        }
+      >
+        <TextInput
+          style={[styles.textInput, modalFieldStyles.inputMultiline]}
+          placeholder="Ej.: guardé para un videojuego"
+          placeholderTextColor={Colors.textLight}
+          value={purposeModal?.note ?? ''}
+          onChangeText={(note) => purposeModal && setPurposeModal({ ...purposeModal, note })}
+          multiline
+        />
+      </AppModal>
+
+      <AppModal
+        visible={!!withdrawApprove}
+        onClose={() => setWithdrawApprove(null)}
+        title="Aprobar retiro"
+        icon="checkmark-circle-outline"
+        iconTone="success"
+        footer={
+          <AppModalActions
+            onCancel={() => setWithdrawApprove(null)}
+            confirmLabel="Confirmar pago"
+            onConfirm={confirmApproveWithdrawal}
+            confirming={resolvingWithdrawal}
+            confirmTone="success"
+          />
+        }
+      >
+        {withdrawApprove ? (
+          <View style={styles.withdrawSummaryBox}>
+            <Text style={styles.withdrawSummaryMain}>
+              {withdrawApprove.childName} · {family?.currency} {withdrawApprove.amount.toFixed(2)}
+            </Text>
+            {withdrawApprove.purposeType ? (
+              <Text style={styles.withdrawSummaryMeta}>
+                Tipo: {withdrawApprove.purposeType === 'necesidad' ? 'Necesidad' : 'Deseo'}
+              </Text>
+            ) : null}
+            {withdrawApprove.goalImpactNote ? (
+              <Text style={styles.withdrawSummaryMeta}>Meta: {withdrawApprove.goalImpactNote}</Text>
+            ) : null}
+          </View>
+        ) : null}
+        <Text style={modalFieldStyles.hint}>Nota interna (opcional) sobre el pago en efectivo.</Text>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Ej.: pagado en efectivo el sábado"
+          placeholderTextColor={Colors.textLight}
+          value={withdrawApprove?.note ?? ''}
+          onChangeText={(note) =>
+            withdrawApprove && setWithdrawApprove({ ...withdrawApprove, note })
+          }
+        />
+      </AppModal>
+
+      <AppModal
+        visible={!!bulkApproveModal}
+        onClose={() => setBulkApproveModal(null)}
+        title="Aprobar retiros pequeños"
+        subtitle="Se aprobarán todos los pendientes con monto menor o igual a este valor."
+        icon="layers-outline"
+        iconTone="success"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setBulkApproveModal(null)}
+            confirmLabel="Aprobar lote"
+            onConfirm={confirmBulkApproveSmall}
+            confirming={bulkApproving}
+            confirmTone="success"
+          />
+        }
+      >
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Monto máximo (X)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Ej. 5"
+              placeholderTextColor={Colors.textLight}
+              keyboardType="decimal-pad"
+              value={bulkApproveModal?.maxAmount ?? ''}
+              onChangeText={(maxAmount) =>
+                bulkApproveModal && setBulkApproveModal({ ...bulkApproveModal, maxAmount })
+              }
+            />
+            <View style={styles.quickMaxRow}>
+              {[2, 5, 10].map((v) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[
+                    styles.quickMaxChip,
+                    Number((bulkApproveModal?.maxAmount ?? '').replace(',', '.')) === v &&
+                      styles.quickMaxChipActive,
+                  ]}
+                  onPress={() =>
+                    bulkApproveModal &&
+                    setBulkApproveModal({ ...bulkApproveModal, maxAmount: String(v) })
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.quickMaxChipText,
+                      Number((bulkApproveModal?.maxAmount ?? '').replace(',', '.')) === v &&
+                        styles.quickMaxChipTextActive,
+                    ]}
+                  >
+                    {'<= '}
+                    {v}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Nota interna (opcional)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Ej.: pago en efectivo hoy"
+              placeholderTextColor={Colors.textLight}
+              value={bulkApproveModal?.note ?? ''}
+              onChangeText={(note) =>
+                bulkApproveModal && setBulkApproveModal({ ...bulkApproveModal, note })
+              }
+            />
+          </View>
+      </AppModal>
+
+      <AppModal
+        visible={!!passwordModal}
+        onClose={() => setPasswordModal(null)}
+        title="Cambiar contraseña"
+        icon="lock-closed-outline"
+        iconTone="primary"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setPasswordModal(null)}
+            confirmLabel="Guardar"
+            onConfirm={submitChangePassword}
+            confirming={changingPassword}
+          />
+        }
+      >
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Contraseña actual</Text>
+            <TextInput
+              style={styles.textInput}
+              secureTextEntry
+              value={passwordModal?.currentPassword ?? ''}
+              onChangeText={(currentPassword) =>
+                passwordModal && setPasswordModal({ ...passwordModal, currentPassword })
+              }
+            />
+          </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Nueva contraseña</Text>
+            <TextInput
+              style={styles.textInput}
+              secureTextEntry
+              placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
+              placeholderTextColor={Colors.textLight}
+              value={passwordModal?.newPassword ?? ''}
+              onChangeText={(newPassword) =>
+                passwordModal && setPasswordModal({ ...passwordModal, newPassword })
+              }
+            />
+          </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Confirmar nueva contraseña</Text>
+            <TextInput
+              style={styles.textInput}
+              secureTextEntry
+              value={passwordModal?.confirmPassword ?? ''}
+              onChangeText={(confirmPassword) =>
+                passwordModal && setPasswordModal({ ...passwordModal, confirmPassword })
+              }
+            />
+          </View>
+      </AppModal>
+
+      <AppModal
+        visible={!!childPinModal}
+        onClose={() => setChildPinModal(null)}
+        title="Cambiar PIN de hijo"
+        icon="keypad-outline"
+        iconTone="accent"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setChildPinModal(null)}
+            confirmLabel="Guardar"
+            onConfirm={submitChangeChildPin}
+            confirming={changingChildPin}
+          />
+        }
+      >
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Hijo</Text>
+            <View style={styles.pickRow}>
+              {children.map((c) => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.pickChip, childPinModal?.childId === c.id && styles.pickChipActive]}
+                  onPress={() => childPinModal && setChildPinModal({ ...childPinModal, childId: c.id })}
+                >
+                  <Text
+                    style={[
+                      styles.pickChipText,
+                      childPinModal?.childId === c.id && styles.pickChipTextActive,
+                    ]}
+                  >
+                    {c.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Nuevo PIN</Text>
+            <TextInput
+              style={styles.textInput}
+              value={childPinModal?.newPin ?? ''}
+              onChangeText={(newPin) => childPinModal && setChildPinModal({ ...childPinModal, newPin })}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={12}
+            />
+          </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Confirmar PIN</Text>
+            <TextInput
+              style={styles.textInput}
+              value={childPinModal?.confirmPin ?? ''}
+              onChangeText={(confirmPin) =>
+                childPinModal && setChildPinModal({ ...childPinModal, confirmPin })
+              }
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={12}
+            />
+          </View>
+      </AppModal>
+
+      <AppModal
+        visible={!!restorePreview}
+        onClose={() => setRestorePreview(null)}
+        title="Vista previa de restauración"
+        subtitle={
+          restorePreview?.family_matches
+            ? 'La familia del respaldo coincide.'
+            : 'ATENCION: el respaldo parece de otra familia.'
+        }
+        icon="cloud-upload-outline"
+        iconTone="accent"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setRestorePreview(null)}
+            confirmLabel="Aplicar restauración"
+            onConfirm={applyRestoreFromPreview}
+            confirming={restoringBackup}
+            confirmDisabled={!restorePreview?.family_matches}
+            confirmTone="danger"
+          />
+        }
+      >
+        <View style={styles.legalCard}>
+          {[
+            ['Tareas', 'chores'],
+            ['Pagos', 'payments'],
+            ['Metas', 'goals'],
+            ['Metas ahorro', 'savings_goals'],
+            ['Retiros', 'withdrawals'],
+            ['Logros', 'achievements'],
+            ['Alertas', 'notifications'],
+          ].map(([label, key]) => (
+            <View key={key} style={styles.legalMenuItem}>
+              <Text style={styles.legalMenuText}>{label}</Text>
+              <Text style={styles.infoValue}>
+                {Number(restorePreview?.backup_counts?.[key] || 0)} /{' '}
+                {Number(restorePreview?.current_counts?.[key] || 0)}
+              </Text>
+            </View>
+          ))}
+          <View style={[styles.legalMenuItem, styles.legalMenuItemLast]}>
+            <Text style={[styles.paymentDate, { flex: 1 }]}>
+              Formato: respaldo / actual. Si aplicas, se reemplaza la actividad actual.
+            </Text>
+          </View>
         </View>
-      </Modal>
-    </View>
+      </AppModal>
+    </ParentScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: Colors.surface,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
   content: {
     flex: 1,
+  },
+  contentInner: {
     padding: 16,
+    paddingBottom: 28,
   },
   profileCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 22,
+    padding: 18,
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    borderWidth: 1.5,
+    borderColor: Colors.primary + '28',
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 5, blur: 12, opacity: 0.1, elevation: 3 }),
+
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 68,
+    height: 68,
+    borderRadius: 22,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
+    borderWidth: 2.5,
+    borderColor: Colors.primaryLight,
   },
   avatarImage: {
     width: '100%',
@@ -2495,25 +2475,51 @@ const styles = StyleSheet.create({
   },
   profileName: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.text,
   },
   profileEmail: {
     fontSize: 14,
     color: Colors.textSecondary,
     marginTop: 2,
+    fontWeight: '500',
   },
   roleBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: Colors.primaryLight + '30',
+    backgroundColor: Colors.primary + '16',
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
     marginTop: 8,
   },
   roleBadgeText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  parentGenderRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  parentGenderChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  parentGenderChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '14',
+  },
+  parentGenderChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  parentGenderChipTextActive: {
     color: Colors.primary,
   },
   section: {
@@ -2527,21 +2533,53 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.text,
+    letterSpacing: -0.2,
+  },
+  editChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primary + '14',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  editChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.primary,
   },
   infoCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 16,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
   },
   cashReadyCard: {
-    backgroundColor: Colors.success + '14',
-    borderWidth: 1,
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
     borderColor: Colors.success + '44',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 18,
+    padding: 14,
     marginBottom: 12,
+    flexDirection: 'row',
+    gap: 12,
+    ...shadow({ color: Colors.success, offsetX: 0, offsetY: 3, blur: 8, opacity: 0.1, elevation: 2 }),
+
+  },
+  cashReadyIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: Colors.success + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cashReadyBody: {
+    flex: 1,
   },
   cashReadyHead: {
     flexDirection: 'row',
@@ -2551,11 +2589,11 @@ const styles = StyleSheet.create({
   },
   cashReadyTitle: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.success,
   },
   cashReadyAmount: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
     color: Colors.success,
   },
@@ -2581,8 +2619,8 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   totalPaid: {
-    color: Colors.secondary,
-    fontWeight: '600',
+    color: Colors.secondaryInk,
+    fontWeight: '700',
   },
   codeValue: {
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
@@ -2724,12 +2762,6 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     marginTop: 4,
   },
-  modalHint: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
   emptyState: {
     backgroundColor: Colors.surface,
     padding: 24,
@@ -2777,8 +2809,8 @@ const styles = StyleSheet.create({
   },
   paymentAmount: {
     fontSize: 14,
-    fontWeight: '600',
-    color: Colors.secondary,
+    fontWeight: '700',
+    color: Colors.secondaryInk,
   },
   paymentIconWithdrawal: {
     backgroundColor: Colors.accent + '18',
@@ -2868,34 +2900,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.error,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '92%',
-  },
-  modalScroll: {
-    width: '100%',
-  },
-  modalScrollContent: {
-    paddingBottom: 8,
-    flexGrow: 1,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
   inputGroup: {
     marginBottom: 20,
   },
@@ -2964,36 +2968,6 @@ const styles = StyleSheet.create({
     color: Colors.text,
     borderWidth: 1,
     borderColor: Colors.border,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-    paddingTop: 4,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  saveButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
   },
   buttonDisabled: {
     opacity: 0.7,

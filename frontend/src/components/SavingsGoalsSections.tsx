@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Modal,
   TextInput,
   Alert,
   ActivityIndicator,
@@ -17,6 +16,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { savingsGoalsAPI, SavingsGoalDTO, childrenAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import { shadow } from '../utils/shadow';
+import AppModal, { AppModalActions, modalFieldStyles } from './AppModal';
+import AccordionSection from './AccordionSection';
+
 
 type ChildRow = { id: string; name: string; balance?: number };
 
@@ -239,11 +242,50 @@ export function ParentSavingsGoalsSection({
     ]);
   };
 
-  const active = savingsGoals.filter((g) => !g.is_completed);
-  const done = savingsGoals.filter((g) => g.is_completed);
+  const pending = savingsGoals.filter((g) => (g.status || 'active') === 'pending');
+  const active = savingsGoals.filter(
+    (g) => !g.is_completed && (g.status || 'active') === 'active'
+  );
+  const done = savingsGoals.filter(
+    (g) => g.is_completed && (g.status || 'active') === 'active'
+  );
 
   const progressPct = (g: SavingsGoalDTO) =>
     g.target_amount > 0 ? Math.min((g.saved_amount / g.target_amount) * 100, 100) : 0;
+
+  const handleApproveProposal = async (g: SavingsGoalDTO) => {
+    setBusyId(g.id);
+    try {
+      await savingsGoalsAPI.approveProposal(g.id);
+      await onReload();
+      Alert.alert('Listo', `Meta «${g.title}» aprobada`);
+    } catch (e: any) {
+      Alert.alert('Error', e.response?.data?.detail || 'No se pudo aprobar');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRejectProposal = (g: SavingsGoalDTO) => {
+    Alert.alert('Rechazar propuesta', `¿Rechazar «${g.title}»?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Rechazar',
+        style: 'destructive',
+        onPress: async () => {
+          setBusyId(g.id);
+          try {
+            await savingsGoalsAPI.rejectProposal(g.id);
+            await onReload();
+          } catch (e: any) {
+            Alert.alert('Error', e.response?.data?.detail || 'No se pudo rechazar');
+          } finally {
+            setBusyId(null);
+          }
+        },
+      },
+    ]);
+  };
 
   if (childrenList.length === 0) {
     return (
@@ -319,7 +361,46 @@ export function ParentSavingsGoalsSection({
 
         <Text style={styles.hint}>
           El dinero sale del saldo del hijo y queda apartado hasta que lo devuelvas o elimines la meta.
+          También puedes aprobar propuestas que envíen tus hijos.
         </Text>
+
+        {pending.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Propuestas de hijos</Text>
+            {pending.map((g) => (
+              <View key={g.id} style={[styles.card, styles.pendingCard]}>
+                <View style={styles.cardHead}>
+                  <View style={[styles.iconWrap, { backgroundColor: Colors.secondary + '33' }]}>
+                    <Ionicons name="bulb-outline" size={22} color={Colors.secondaryInk} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{g.title}</Text>
+                    <Text style={styles.cardMeta}>
+                      {getChildName(g.child_id)} · objetivo {currency} {g.target_amount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+                {g.note ? <Text style={styles.note}>{g.note}</Text> : null}
+                <View style={styles.rowBtns}>
+                  <TouchableOpacity
+                    style={styles.btnSecondary}
+                    onPress={() => handleApproveProposal(g)}
+                    disabled={busyId === g.id}
+                  >
+                    <Text style={styles.btnSecondaryText}>Aprobar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.btnOutline}
+                    onPress={() => handleRejectProposal(g)}
+                    disabled={busyId === g.id}
+                  >
+                    <Text style={styles.btnOutlineText}>Rechazar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
+        ) : null}
 
         {active.length > 0 && <Text style={styles.sectionTitle}>En progreso</Text>}
         {active.map((g) => (
@@ -330,7 +411,10 @@ export function ParentSavingsGoalsSection({
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>{g.title}</Text>
-                <Text style={styles.cardMeta}>{getChildName(g.child_id)}</Text>
+                <Text style={styles.cardMeta}>
+                  {getChildName(g.child_id)}
+                  {g.proposed_by_child ? ' · propuesta del hijo' : ''}
+                </Text>
               </View>
               <TouchableOpacity onPress={() => handleDelete(g)}>
                 <Ionicons name="trash-outline" size={20} color={Colors.error} />
@@ -406,8 +490,7 @@ export function ParentSavingsGoalsSection({
         )}
 
         {done.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Objetivo alcanzado</Text>
+          <AccordionSection title="Objetivo alcanzado" count={done.length} defaultOpen={false}>
             {done.map((g) => (
               <View key={g.id} style={[styles.card, styles.cardDone]}>
                 <View style={styles.cardHead}>
@@ -422,157 +505,149 @@ export function ParentSavingsGoalsSection({
                 </Text>
               </View>
             ))}
-          </>
+          </AccordionSection>
         )}
       </ScrollView>
 
-      <Modal visible={showCreate} transparent animationType="slide" onRequestClose={() => setShowCreate(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Nueva meta de ahorro</Text>
-            <Text style={styles.inputLabel}>Nombre</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ej.: Bicicleta, videjuego…"
-              placeholderTextColor={Colors.textLight}
-              value={title}
-              onChangeText={setTitle}
-            />
-            <Text style={styles.inputLabel}>Nota (opcional)</Text>
-            <TextInput
-              style={[styles.input, { minHeight: 64 }]}
-              placeholder="Para qué ahorra"
-              placeholderTextColor={Colors.textLight}
-              value={note}
-              onChangeText={setNote}
-              multiline
-            />
-            <Text style={styles.inputLabel}>Monto objetivo</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              keyboardType="decimal-pad"
-              value={targetStr}
-              onChangeText={setTargetStr}
-              placeholderTextColor={Colors.textLight}
-            />
-            <Text style={styles.inputLabel}>Hijo</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.childPick}>
-              {childrenList.map((c) => (
+      <AppModal
+        visible={showCreate}
+        onClose={() => setShowCreate(false)}
+        title="Nueva meta de ahorro"
+        icon="flag-outline"
+        iconTone="primary"
+        variant="sheet"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowCreate(false)}
+            confirmLabel="Crear"
+            onConfirm={submitCreate}
+            confirming={saving}
+          />
+        }
+      >
+        <Text style={modalFieldStyles.label}>Nombre</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Ej.: Bicicleta, videjuego…"
+          placeholderTextColor={Colors.textLight}
+          value={title}
+          onChangeText={setTitle}
+        />
+        <Text style={modalFieldStyles.label}>Nota (opcional)</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="Para qué ahorra"
+          placeholderTextColor={Colors.textLight}
+          value={note}
+          onChangeText={setNote}
+          multiline
+        />
+        <Text style={modalFieldStyles.label}>Monto objetivo</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="0"
+          keyboardType="decimal-pad"
+          value={targetStr}
+          onChangeText={setTargetStr}
+          placeholderTextColor={Colors.textLight}
+        />
+        <Text style={modalFieldStyles.label}>Hijo</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.childPick}>
+          {childrenList.map((c) => (
+            <TouchableOpacity
+              key={c.id}
+              style={[styles.chip, childId === c.id && styles.chipOn]}
+              onPress={() => setChildId(c.id)}
+            >
+              <Text style={[styles.chipText, childId === c.id && styles.chipTextOn]}>{c.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </AppModal>
+
+      <AppModal
+        visible={!!amountModal}
+        onClose={() => setAmountModal(null)}
+        title={amountModal?.mode === 'allocate' ? 'Aportar a la meta' : 'Devolver al saldo'}
+        icon={amountModal?.mode === 'allocate' ? 'add-circle-outline' : 'arrow-undo-outline'}
+        iconTone={amountModal?.mode === 'allocate' ? 'success' : 'accent'}
+        variant="sheet"
+        footer={
+          <AppModalActions
+            onCancel={() => setAmountModal(null)}
+            confirmLabel="Confirmar"
+            onConfirm={submitAmount}
+            confirming={!!busyId}
+            confirmTone={amountModal?.mode === 'allocate' ? 'success' : 'primary'}
+          />
+        }
+      >
+        {amountModal ? (
+          <Text style={styles.modalBalanceHint}>
+            {amountModal.mode === 'allocate' ? (
+              <>
+                Saldo disponible del hijo:{' '}
+                <Text style={styles.modalBalanceStrong}>
+                  {currency} {getBalance(amountModal.goal.child_id).toFixed(2)}
+                </Text>
+                {'\n'}
+                <Text style={styles.modalBalanceSub}>No puedes apartar más que este saldo.</Text>
+              </>
+            ) : (
+              <>
+                Apartado en esta meta:{' '}
+                <Text style={styles.modalBalanceStrong}>
+                  {currency} {amountModal.goal.saved_amount.toFixed(2)}
+                </Text>
+                {'\n'}
+                <Text style={styles.modalBalanceSub}>Máximo que puedes devolver al saldo disponible.</Text>
+              </>
+            )}
+          </Text>
+        ) : null}
+        {amountModal ? (
+          <View style={styles.pctQuickRow}>
+            <Text style={styles.pctQuickLabel}>
+              {amountModal.mode === 'allocate'
+                ? 'Rápido (del saldo disponible)'
+                : 'Rápido (de lo apartado en la meta)'}
+            </Text>
+            <View style={styles.pctQuickBtns}>
+              {QUICK_PERCENT_FRACTIONS.map(({ label, fraction }) => (
                 <TouchableOpacity
-                  key={c.id}
-                  style={[styles.chip, childId === c.id && styles.chipOn]}
-                  onPress={() => setChildId(c.id)}
+                  key={label}
+                  style={styles.pctQuickBtn}
+                  onPress={() => {
+                    const pool =
+                      amountModal.mode === 'allocate'
+                        ? getBalance(amountModal.goal.child_id)
+                        : amountModal.goal.saved_amount;
+                    setAmountStr(amountFromPoolFraction(pool, fraction));
+                  }}
                 >
-                  <Text style={[styles.chipText, childId === c.id && styles.chipTextOn]}>{c.name}</Text>
+                  <Text style={styles.pctQuickBtnText}>{label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
-            <View style={styles.modalRow}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowCreate(false)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalOk, saving && { opacity: 0.7 }]}
-                onPress={submitCreate}
-                disabled={saving}
-              >
-                {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.modalOkText}>Crear</Text>}
-              </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!amountModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAmountModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              {amountModal?.mode === 'allocate' ? 'Aportar a la meta' : 'Devolver al saldo'}
-            </Text>
-            {amountModal ? (
-              <Text style={styles.modalBalanceHint}>
-                {amountModal.mode === 'allocate' ? (
-                  <>
-                    Saldo disponible del hijo:{' '}
-                    <Text style={styles.modalBalanceStrong}>
-                      {currency} {getBalance(amountModal.goal.child_id).toFixed(2)}
-                    </Text>
-                    {'\n'}
-                    <Text style={styles.modalBalanceSub}>No puedes apartar más que este saldo.</Text>
-                  </>
-                ) : (
-                  <>
-                    Apartado en esta meta:{' '}
-                    <Text style={styles.modalBalanceStrong}>
-                      {currency} {amountModal.goal.saved_amount.toFixed(2)}
-                    </Text>
-                    {'\n'}
-                    <Text style={styles.modalBalanceSub}>Máximo que puedes devolver al saldo disponible.</Text>
-                  </>
-                )}
-              </Text>
-            ) : null}
-            {amountModal ? (
-              <View style={styles.pctQuickRow}>
-                <Text style={styles.pctQuickLabel}>
-                  {amountModal.mode === 'allocate'
-                    ? 'Rápido (del saldo disponible)'
-                    : 'Rápido (de lo apartado en la meta)'}
-                </Text>
-                <View style={styles.pctQuickBtns}>
-                  {QUICK_PERCENT_FRACTIONS.map(({ label, fraction }) => (
-                    <TouchableOpacity
-                      key={label}
-                      style={styles.pctQuickBtn}
-                      onPress={() => {
-                        const pool =
-                          amountModal.mode === 'allocate'
-                            ? getBalance(amountModal.goal.child_id)
-                            : amountModal.goal.saved_amount;
-                        setAmountStr(amountFromPoolFraction(pool, fraction));
-                      }}
-                    >
-                      <Text style={styles.pctQuickBtnText}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-            <TextInput
-              style={styles.input}
-              placeholder="Monto"
-              keyboardType="decimal-pad"
-              value={amountStr}
-              onChangeText={setAmountStr}
-              placeholderTextColor={Colors.textLight}
-            />
-            <View style={styles.modalRow}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setAmountModal(null)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalOk, busyId && { opacity: 0.7 }]}
-                onPress={submitAmount}
-                disabled={!!busyId}
-              >
-                {busyId ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.modalOkText}>Confirmar</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        ) : null}
+        <Text style={modalFieldStyles.label}>Monto</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Monto"
+          keyboardType="decimal-pad"
+          value={amountStr}
+          onChangeText={setAmountStr}
+          placeholderTextColor={Colors.textLight}
+        />
+      </AppModal>
     </>
   );
 }
 
 export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
-  const { selectedChild, setSelectedChild } = useAuthStore();
+  const { selectedChild, setSelectedChild, isChildSession } = useAuthStore();
   const [goals, setGoals] = useState<SavingsGoalDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -581,6 +656,11 @@ export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
   );
   const [amountStr, setAmountStr] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [showPropose, setShowPropose] = useState(false);
+  const [proposeTitle, setProposeTitle] = useState('');
+  const [proposeNote, setProposeNote] = useState('');
+  const [proposeTarget, setProposeTarget] = useState('');
+  const [proposing, setProposing] = useState(false);
   const [milestoneToast, setMilestoneToast] = useState<null | { title: string; milestone: number }>(
     null
   );
@@ -705,6 +785,33 @@ export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
   const progressPct = (g: SavingsGoalDTO) =>
     g.target_amount > 0 ? Math.min((g.saved_amount / g.target_amount) * 100, 100) : 0;
 
+  const submitPropose = async () => {
+    const t = proposeTitle.trim();
+    const target = parseAmount(proposeTarget);
+    if (!t || target == null) {
+      Alert.alert('Revisa', 'Escribe un nombre y un monto objetivo válido');
+      return;
+    }
+    setProposing(true);
+    try {
+      await savingsGoalsAPI.propose({
+        title: t,
+        note: proposeNote.trim() || undefined,
+        target_amount: target,
+      });
+      setShowPropose(false);
+      setProposeTitle('');
+      setProposeNote('');
+      setProposeTarget('');
+      await loadGoals();
+      Alert.alert('Enviado', 'Tu familia revisará la propuesta de meta.');
+    } catch (e: any) {
+      Alert.alert('Error', e.response?.data?.detail || 'No se pudo enviar la propuesta');
+    } finally {
+      setProposing(false);
+    }
+  };
+
   if (!selectedChild) {
     return (
       <View style={styles.centered}>
@@ -721,8 +828,9 @@ export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
     );
   }
 
-  const active = goals.filter((g) => !g.is_completed);
-  const done = goals.filter((g) => g.is_completed);
+  const pending = goals.filter((g) => (g.status || 'active') === 'pending');
+  const active = goals.filter((g) => !g.is_completed && (g.status || 'active') === 'active');
+  const done = goals.filter((g) => g.is_completed && (g.status || 'active') === 'active');
 
   return (
     <>
@@ -803,15 +911,51 @@ export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
       >
         <Text style={styles.hint}>
-          Saldo disponible: {currency} {selectedChild.balance.toFixed(2)}. Pide ayuda a tu familia si necesitas una meta
-          nueva.
+          Saldo disponible: {currency} {selectedChild.balance.toFixed(2)}. Puedes proponer una meta y tu familia la
+          aprueba.
         </Text>
 
-        {goals.length === 0 ? (
+        {isChildSession ? (
+          <TouchableOpacity
+            style={styles.createBanner}
+            onPress={() => setShowPropose(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="bulb-outline" size={22} color={Colors.primary} />
+            <Text style={styles.createBannerText}>Proponer una meta</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {pending.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Esperando aprobación</Text>
+            {pending.map((g) => (
+              <View key={g.id} style={[styles.card, styles.pendingCard]}>
+                <View style={styles.cardHead}>
+                  <View style={[styles.iconWrap, { backgroundColor: Colors.secondary + '33' }]}>
+                    <Ionicons name="time-outline" size={22} color={Colors.secondaryInk} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{g.title}</Text>
+                    <Text style={styles.cardMeta}>
+                      Objetivo {currency} {g.target_amount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+                {g.note ? <Text style={styles.note}>{g.note}</Text> : null}
+                <Text style={styles.pendingHint}>Tu familia aún no ha respondido</Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {active.length === 0 && done.length === 0 && pending.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons name="wallet-outline" size={48} color={Colors.textLight} />
             <Text style={styles.emptyTitle}>Aún no hay metas de ahorro</Text>
-            <Text style={styles.emptySub}>Cuando tus padres creen una, podrás apartar dinero aquí.</Text>
+            <Text style={styles.emptySub}>
+              Propón una idea o pide a tus padres que creen una meta para ti.
+            </Text>
           </View>
         ) : (
           <>
@@ -883,94 +1027,141 @@ export function ChildSavingsGoalsSection({ currency }: { currency: string }) {
             ))}
 
             {done.length > 0 && (
-              <>
-                <Text style={[styles.sectionTitle, { marginTop: 16 }]}>¡Lo lograste!</Text>
+              <AccordionSection title="¡Lo lograste!" count={done.length} defaultOpen={false}>
                 {done.map((g) => (
                   <View key={g.id} style={[styles.card, styles.cardDone]}>
                     <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
                     <Text style={[styles.cardTitle, { marginLeft: 8, flex: 1 }]}>{g.title}</Text>
                   </View>
                 ))}
-              </>
+              </AccordionSection>
             )}
           </>
         )}
       </ScrollView>
 
-      <Modal visible={!!amountModal} transparent animationType="fade" onRequestClose={() => setAmountModal(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              {amountModal?.mode === 'allocate' ? '¿Cuánto apartas?' : '¿Cuánto vuelve a tu saldo?'}
-            </Text>
-            {amountModal && selectedChild ? (
-              <Text style={styles.modalBalanceHint}>
-                {amountModal.mode === 'allocate' ? (
-                  <>
-                    Tu saldo disponible:{' '}
-                    <Text style={styles.modalBalanceStrong}>
-                      {currency} {selectedChild.balance.toFixed(2)}
-                    </Text>
-                    {'\n'}
-                    <Text style={styles.modalBalanceSub}>Solo puedes apartar hasta este monto.</Text>
-                  </>
-                ) : (
-                  <>
-                    En esta meta:{' '}
-                    <Text style={styles.modalBalanceStrong}>
-                      {currency} {amountModal.goal.saved_amount.toFixed(2)}
-                    </Text>
-                    {'\n'}
-                    <Text style={styles.modalBalanceSub}>Máximo que puedes pasar de vuelta a tu saldo.</Text>
-                  </>
-                )}
-              </Text>
-            ) : null}
-            {amountModal && selectedChild ? (
-              <View style={styles.pctQuickRow}>
-                <Text style={styles.pctQuickLabel}>
-                  {amountModal.mode === 'allocate'
-                    ? 'Rápido (de tu saldo disponible)'
-                    : 'Rápido (de lo apartado en la meta)'}
+      <AppModal
+        visible={!!amountModal}
+        onClose={() => setAmountModal(null)}
+        title={amountModal?.mode === 'allocate' ? '¿Cuánto apartas?' : '¿Cuánto vuelve a tu saldo?'}
+        icon={amountModal?.mode === 'allocate' ? 'add-circle-outline' : 'arrow-undo-outline'}
+        iconTone={amountModal?.mode === 'allocate' ? 'success' : 'accent'}
+        variant="sheet"
+        footer={
+          <AppModalActions
+            onCancel={() => setAmountModal(null)}
+            confirmLabel="Listo"
+            onConfirm={submitAmount}
+            confirming={!!busyId}
+            confirmTone={amountModal?.mode === 'allocate' ? 'success' : 'primary'}
+          />
+        }
+      >
+        {amountModal && selectedChild ? (
+          <Text style={styles.modalBalanceHint}>
+            {amountModal.mode === 'allocate' ? (
+              <>
+                Tu saldo disponible:{' '}
+                <Text style={styles.modalBalanceStrong}>
+                  {currency} {selectedChild.balance.toFixed(2)}
                 </Text>
-                <View style={styles.pctQuickBtns}>
-                  {QUICK_PERCENT_FRACTIONS.map(({ label, fraction }) => (
-                    <TouchableOpacity
-                      key={label}
-                      style={styles.pctQuickBtn}
-                      onPress={() => {
-                        const pool =
-                          amountModal.mode === 'allocate'
-                            ? selectedChild.balance
-                            : amountModal.goal.saved_amount;
-                        setAmountStr(amountFromPoolFraction(pool, fraction));
-                      }}
-                    >
-                      <Text style={styles.pctQuickBtnText}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-            <TextInput
-              style={styles.input}
-              placeholder="Monto"
-              keyboardType="decimal-pad"
-              value={amountStr}
-              onChangeText={setAmountStr}
-              placeholderTextColor={Colors.textLight}
-            />
-            <View style={styles.modalRow}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setAmountModal(null)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalOk, busyId && { opacity: 0.7 }]} onPress={submitAmount} disabled={!!busyId}>
-                {busyId ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.modalOkText}>Listo</Text>}
-              </TouchableOpacity>
+                {'\n'}
+                <Text style={styles.modalBalanceSub}>Solo puedes apartar hasta este monto.</Text>
+              </>
+            ) : (
+              <>
+                En esta meta:{' '}
+                <Text style={styles.modalBalanceStrong}>
+                  {currency} {amountModal.goal.saved_amount.toFixed(2)}
+                </Text>
+                {'\n'}
+                <Text style={styles.modalBalanceSub}>Máximo que puedes pasar de vuelta a tu saldo.</Text>
+              </>
+            )}
+          </Text>
+        ) : null}
+        {amountModal && selectedChild ? (
+          <View style={styles.pctQuickRow}>
+            <Text style={styles.pctQuickLabel}>
+              {amountModal.mode === 'allocate'
+                ? 'Rápido (de tu saldo disponible)'
+                : 'Rápido (de lo apartado en la meta)'}
+            </Text>
+            <View style={styles.pctQuickBtns}>
+              {QUICK_PERCENT_FRACTIONS.map(({ label, fraction }) => (
+                <TouchableOpacity
+                  key={label}
+                  style={styles.pctQuickBtn}
+                  onPress={() => {
+                    const pool =
+                      amountModal.mode === 'allocate'
+                        ? selectedChild.balance
+                        : amountModal.goal.saved_amount;
+                    setAmountStr(amountFromPoolFraction(pool, fraction));
+                  }}
+                >
+                  <Text style={styles.pctQuickBtnText}>{label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
-        </View>
-      </Modal>
+        ) : null}
+        <Text style={modalFieldStyles.label}>Monto</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Monto"
+          keyboardType="decimal-pad"
+          value={amountStr}
+          onChangeText={setAmountStr}
+          placeholderTextColor={Colors.textLight}
+        />
+      </AppModal>
+
+      <AppModal
+        visible={showPropose}
+        onClose={() => setShowPropose(false)}
+        title="Proponer meta de ahorro"
+        subtitle="Tu familia revisará la idea. Cuando la aprueben, podrás aportar de tu saldo."
+        icon="bulb-outline"
+        iconTone="secondary"
+        variant="sheet"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowPropose(false)}
+            confirmLabel="Enviar"
+            onConfirm={submitPropose}
+            confirming={proposing}
+          />
+        }
+      >
+        <Text style={modalFieldStyles.label}>¿Para qué quieres ahorrar?</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="¿Para qué quieres ahorrar?"
+          value={proposeTitle}
+          onChangeText={setProposeTitle}
+          placeholderTextColor={Colors.textLight}
+        />
+        <Text style={modalFieldStyles.label}>Nota (opcional)</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="Nota (opcional)"
+          value={proposeNote}
+          onChangeText={setProposeNote}
+          placeholderTextColor={Colors.textLight}
+          multiline
+        />
+        <Text style={modalFieldStyles.label}>Monto objetivo ({currency})</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder={`Monto objetivo (${currency})`}
+          keyboardType="decimal-pad"
+          value={proposeTarget}
+          onChangeText={setProposeTarget}
+          placeholderTextColor={Colors.textLight}
+        />
+      </AppModal>
     </>
   );
 }
@@ -998,6 +1189,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.text,
     marginBottom: 10,
+  },
+  pendingCard: {
+    borderColor: Colors.secondary,
+    backgroundColor: Colors.backgroundAlt,
+  },
+  pendingHint: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.secondaryInk,
   },
   createBanner: {
     flexDirection: 'row',
@@ -1129,24 +1330,41 @@ const styles = StyleSheet.create({
     color: Colors.success,
     fontWeight: '600',
   },
-  rowBtns: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  rowBtns: { flexDirection: 'row', gap: 10, marginTop: 14 },
   btnSecondary: {
     flex: 1,
     backgroundColor: Colors.primary,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
   },
-  btnSecondaryText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
+  btnSecondaryText: {
+    color: Colors.white,
+    fontWeight: '800',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   btnOutline: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingVertical: 10,
-    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '10',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
   },
-  btnOutlineText: { color: Colors.text, fontWeight: '600', fontSize: 14 },
+  btnOutlineText: {
+    color: Colors.primary,
+    fontWeight: '800',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   emptyCard: {
     alignItems: 'center',
     padding: 28,
@@ -1158,18 +1376,6 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '600', color: Colors.text, marginTop: 12 },
   emptySub: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   doneAmount: { fontSize: 14, color: Colors.textSecondary, marginTop: 8 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 20,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: 12 },
   modalBalanceHint: {
     fontSize: 14,
     color: Colors.text,
@@ -1207,17 +1413,6 @@ const styles = StyleSheet.create({
     margin: 4,
   },
   pctQuickBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: Colors.text, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 16,
-    color: Colors.text,
-    marginBottom: 12,
-    backgroundColor: Colors.background,
-  },
   childPick: { marginBottom: 12, maxHeight: 44 },
   chip: {
     paddingHorizontal: 14,
@@ -1230,23 +1425,6 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   chipText: { fontSize: 14, color: Colors.text },
   chipTextOn: { color: Colors.white, fontWeight: '600' },
-  modalRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  modalCancel: {
-    flex: 1,
-    padding: 14,
-    alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: Colors.background,
-  },
-  modalCancelText: { fontSize: 16, fontWeight: '600', color: Colors.textSecondary },
-  modalOk: {
-    flex: 1,
-    padding: 14,
-    alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: Colors.primary,
-  },
-  modalOkText: { fontSize: 16, fontWeight: '700', color: Colors.white },
   celebrationToast: {
     position: 'absolute',
     top: 14,
@@ -1261,11 +1439,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowOffset: { width: 0, height: 5 },
-    shadowRadius: 8,
-    elevation: 4,
+    ...shadow({ color: '#000000', offsetY: 5, blur: 8, opacity: 0.18, elevation: 4 }),
   },
   celebrationToastBig: {
     backgroundColor: Colors.primary,

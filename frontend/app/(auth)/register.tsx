@@ -1,74 +1,112 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, TextInput, Pressable, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuthStore } from '../../src/store/authStore';
-import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
+import { useAuthStore } from '../../src/store/authStore';
+import { getParentAvatarSource } from '../../src/utils/avatars';
+import { hapticTap } from '../../src/utils/feedback';
+import { MIN_PASSWORD_LENGTH } from '../../src/constants/auth';
+import { useGoBack } from '../../src/utils/navigation';
+import AuthShell from '../../src/components/ui/AuthShell';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import ChoiceRow from '../../src/components/ui/ChoiceRow';
+import IconTile from '../../src/components/ui/IconTile';
+import PasswordStrength from '../../src/components/ui/PasswordStrength';
+import TextField from '../../src/components/ui/TextField';
+import { Colors, Radius, Spacing, Type } from '../../src/theme';
+
+type Step = 1 | 2 | 3;
+type FamilyPath = 'create' | 'join';
+type Gender = 'mujer' | 'hombre';
+
+const STEP_COPY: Record<Step, { title: string; subtitle: string }> = {
+  1: { title: 'Crear cuenta', subtitle: 'Tu perfil de padre o tutor' },
+  2: { title: 'Tu acceso', subtitle: 'Correo y contraseña para entrar' },
+  3: { title: 'Tu familia', subtitle: 'Crea una nueva o únete con un código' },
+};
+
+const GENDERS: { value: Gender; label: string }[] = [
+  { value: 'hombre', label: 'Papá' },
+  { value: 'mujer', label: 'Mamá' },
+];
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const exit = useGoBack();
   const { register, isLoading } = useAuthStore();
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
+  const [step, setStep] = useState<Step>(1);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [familyPath, setFamilyPath] = useState<FamilyPath>('create');
+  const [gender, setGender] = useState<Gender>('hombre');
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
   const [errors, setErrors] = useState<{
     name?: string;
     email?: string;
     password?: string;
     confirmPassword?: string;
+    inviteCode?: string;
+    legal?: string;
   }>({});
 
-  const validateForm = () => {
-    const newErrors: typeof errors = {};
+  const clearError = (key: keyof typeof errors) => {
+    if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }));
+  };
 
-    if (!name) {
-      newErrors.name = 'El nombre es requerido';
-    } else if (name.length < 2) {
-      newErrors.name = 'El nombre debe tener al menos 2 caracteres';
+  const validateStep = (target: Step) => {
+    const next: typeof errors = {};
+    if (target >= 1) {
+      if (!name.trim()) next.name = 'El nombre es requerido';
+      else if (name.trim().length < 2) next.name = 'Usa al menos 2 caracteres';
     }
-
-    if (!email) {
-      newErrors.email = 'El correo es requerido';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Ingresa un correo válido';
+    if (target >= 2) {
+      if (!email.trim()) next.email = 'El correo es requerido';
+      else if (!/\S+@\S+\.\S+/.test(email.trim())) next.email = 'Ingresa un correo válido';
+      if (!password) next.password = 'La contraseña es requerida';
+      else if (password.length < MIN_PASSWORD_LENGTH)
+        next.password = `Mínimo ${MIN_PASSWORD_LENGTH} caracteres`;
+      if (!confirmPassword) next.confirmPassword = 'Confirma tu contraseña';
+      else if (password !== confirmPassword) next.confirmPassword = 'Las contraseñas no coinciden';
     }
-
-    if (!password) {
-      newErrors.password = 'La contraseña es requerida';
-    } else if (password.length < 6) {
-      newErrors.password = 'La contraseña debe tener al menos 6 caracteres';
+    if (target >= 3) {
+      if (familyPath === 'join' && inviteCode.trim().length < 4) {
+        next.inviteCode = 'Ingresa el código que te compartieron';
+      }
+      if (!acceptedLegal) next.legal = 'Debes aceptar los términos para continuar';
     }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
 
-    if (!confirmPassword) {
-      newErrors.confirmPassword = 'Confirma tu contraseña';
-    } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'Las contraseñas no coinciden';
+  const goNext = () => {
+    if (!validateStep(step)) return;
+    setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
+  };
+
+  const goBack = () => {
+    if (step === 1) {
+      exit();
+      return;
     }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
   };
 
   const handleRegister = async () => {
-    if (!validateForm()) return;
-
+    if (!validateStep(3)) return;
     try {
-      await register(email, password, name, inviteCode.trim() || undefined);
+      await register(
+        email.trim(),
+        password,
+        name.trim(),
+        familyPath === 'join' ? inviteCode.trim() || undefined : undefined,
+        gender
+      );
       router.replace('/(parent)/home');
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Error al crear la cuenta';
@@ -76,301 +114,348 @@ export default function RegisterScreen() {
     }
   };
 
+  const copy = STEP_COPY[step];
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <AuthShell
+      title={copy.title}
+      subtitle={copy.subtitle}
+      onBack={goBack}
+      backLabel={step === 1 ? 'Volver' : 'Paso anterior'}
+      step={{ current: step, total: 3 }}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <FlagStripe height={4} style={styles.flagStripe} />
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
+      {step === 1 ? (
+        <Card style={styles.card}>
+          <TextField
+            label="Nombre completo"
+            icon="person-outline"
+            placeholder="Cómo te dicen en casa"
+            value={name}
+            onChangeText={(t) => {
+              setName(t);
+              clearError('name');
+            }}
+            error={errors.name}
+            autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            returnKeyType="next"
+            onSubmitEditing={goNext}
+          />
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Crear Cuenta</Text>
-          <Text style={styles.subtitle}>Registra tu cuenta de padre/tutor</Text>
-        </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Nombre Completo</Text>
-            <View style={[styles.inputWrapper, errors.name && styles.inputError]}>
-              <Ionicons name="person-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Tu nombre"
-                placeholderTextColor={Colors.textLight}
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-              />
+          <View>
+            <Text style={styles.label}>Tu perfil</Text>
+            <View style={styles.genderRow} accessibilityRole="radiogroup">
+              {GENDERS.map((g) => {
+                const active = gender === g.value;
+                return (
+                  <Pressable
+                    key={g.value}
+                    style={[styles.genderCard, active && styles.genderCardActive]}
+                    onPress={() => {
+                      setGender(g.value);
+                      void hapticTap();
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityLabel={g.label}
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Image source={getParentAvatarSource(g.value)} style={styles.genderAvatar} />
+                    <Text style={[styles.genderLabel, active && styles.genderLabelActive]}>{g.label}</Text>
+                    {active ? (
+                      <View style={styles.checkDot}>
+                        <Ionicons name="checkmark" size={12} color={Colors.white} />
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
             </View>
-            {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
+            <Text style={[Type.caption, styles.hint]}>También si eres tutor o tutora de la familia.</Text>
+          </View>
+        </Card>
+      ) : null}
+
+      {step === 2 ? (
+        <Card style={styles.card}>
+          <TextField
+            label="Correo electrónico"
+            icon="mail-outline"
+            placeholder="tu@correo.com"
+            value={email}
+            onChangeText={(t) => {
+              setEmail(t);
+              clearError('email');
+            }}
+            error={errors.email}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+          />
+
+          <View>
+            <TextField
+              ref={passwordRef}
+              label="Contraseña"
+              icon="lock-closed-outline"
+              placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
+              value={password}
+              onChangeText={(t) => {
+                setPassword(t);
+                clearError('password');
+              }}
+              error={errors.password}
+              hint={password ? undefined : `Mínimo ${MIN_PASSWORD_LENGTH} caracteres. Mejor si mezclas letras y números.`}
+              secureToggle
+              autoComplete="new-password"
+              textContentType="newPassword"
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => confirmRef.current?.focus()}
+            />
+            <PasswordStrength password={password} />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Correo Electrónico</Text>
-            <View style={[styles.inputWrapper, errors.email && styles.inputError]}>
-              <Ionicons name="mail-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="tu@correo.com"
-                placeholderTextColor={Colors.textLight}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
+          <TextField
+            ref={confirmRef}
+            label="Confirmar contraseña"
+            icon="shield-checkmark-outline"
+            placeholder="Repite tu contraseña"
+            value={confirmPassword}
+            onChangeText={(t) => {
+              setConfirmPassword(t);
+              clearError('confirmPassword');
+            }}
+            error={errors.confirmPassword}
+            secureToggle
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="next"
+            onSubmitEditing={goNext}
+          />
+        </Card>
+      ) : null}
+
+      {step === 3 ? (
+        <Card style={styles.card}>
+          <View style={styles.choices} accessibilityRole="radiogroup">
+            <Text style={styles.label}>¿Cómo empiezas?</Text>
+            <ChoiceRow
+              title="Crear mi familia"
+              description="Luego agregas hijos y tareas desde Inicio."
+              selected={familyPath === 'create'}
+              leading={<IconTile icon="home" tone="primary" size={44} />}
+              onPress={() => {
+                setFamilyPath('create');
+                clearError('inviteCode');
+              }}
+            />
+            <ChoiceRow
+              title="Me invitaron"
+              description="Únete con el código de otro padre o tutor."
+              selected={familyPath === 'join'}
+              leading={<IconTile icon="people" tone="secondary" size={44} />}
+              onPress={() => setFamilyPath('join')}
+            />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Contraseña</Text>
-            <View style={[styles.inputWrapper, errors.password && styles.inputError]}>
-              <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Mínimo 6 caracteres"
-                placeholderTextColor={Colors.textLight}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons
-                  name={showPassword ? 'eye-outline' : 'eye-off-outline'}
-                  size={20}
-                  color={Colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+          {familyPath === 'join' ? (
+            <TextField
+              label="Código de invitación"
+              icon="key-outline"
+              placeholder="Ej. FAMILIA12"
+              value={inviteCode}
+              onChangeText={(t) => {
+                setInviteCode(t.toUpperCase());
+                clearError('inviteCode');
+              }}
+              error={errors.inviteCode}
+              code
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+          ) : null}
+
+          <View style={styles.divider} />
+
+          <View>
+            <Pressable
+              style={styles.legalRow}
+              onPress={() => {
+                setAcceptedLegal((v) => !v);
+                clearError('legal');
+              }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptedLegal }}
+            >
+              <View style={[styles.checkbox, acceptedLegal && styles.checkboxOn, !!errors.legal && styles.checkboxError]}>
+                {acceptedLegal ? <Ionicons name="checkmark" size={14} color={Colors.white} /> : null}
+              </View>
+              <Text style={[Type.caption, styles.legalAccept]}>
+                Soy mayor de edad o actúo con autoridad parental, y acepto los{' '}
+                <Text style={styles.inlineLink} onPress={() => router.push('/(public)/terms')}>
+                  Términos de uso
+                </Text>
+                {' '}y la{' '}
+                <Text style={styles.inlineLink} onPress={() => router.push('/(public)/privacy')}>
+                  Política de privacidad
+                </Text>
+                .
+              </Text>
+            </Pressable>
+            {errors.legal ? (
+              <View style={styles.errorRow} accessibilityLiveRegion="polite">
+                <Ionicons name="alert-circle" size={14} color={Colors.error} />
+                <Text style={styles.errorText}>{errors.legal}</Text>
+              </View>
+            ) : null}
           </View>
+        </Card>
+      ) : null}
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Código de invitación (opcional)</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="people-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Si te invitaron a una familia"
-                placeholderTextColor={Colors.textLight}
-                value={inviteCode}
-                onChangeText={(t) => setInviteCode(t.toUpperCase())}
-                autoCapitalize="characters"
-                autoCorrect={false}
-              />
-            </View>
-            <Text style={styles.hintText}>
-              Déjalo vacío si vas a crear tu propia familia después de registrarte.
-            </Text>
-          </View>
+      <Button
+        label={step < 3 ? 'Continuar' : 'Crear cuenta'}
+        iconRight={step < 3 ? 'arrow-forward' : 'sparkles'}
+        size="lg"
+        loading={isLoading}
+        onPress={step < 3 ? goNext : handleRegister}
+      />
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Confirmar Contraseña</Text>
-            <View style={[styles.inputWrapper, errors.confirmPassword && styles.inputError]}>
-              <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Repite tu contraseña"
-                placeholderTextColor={Colors.textLight}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showPassword}
-              />
-            </View>
-            {errors.confirmPassword && (
-              <Text style={styles.errorText}>{errors.confirmPassword}</Text>
-            )}
-          </View>
-
-          <Text style={styles.legalAccept}>
-            Al crear una cuenta declaras ser mayor de edad o actuar con autoridad parental sobre los
-            menores que registres, y aceptas los{' '}
-            <Text style={styles.legalInlineLink} onPress={() => router.push('/(public)/terms')}>
-              Términos de uso
-            </Text>
-            {' '}y la{' '}
-            <Text style={styles.legalInlineLink} onPress={() => router.push('/(public)/privacy')}>
-              Política de privacidad
-            </Text>
-            .
-          </Text>
-
-          <TouchableOpacity
-            style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
-            onPress={handleRegister}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.submitButtonText}>Crear Cuenta</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.childEntryButton}
+      {step === 1 ? (
+        <View style={styles.childBlock}>
+          <Button
+            label="Soy hijo o hija"
+            icon="happy"
+            variant="kid"
             onPress={() => router.push('/(auth)/child-login')}
-          >
-            <Ionicons name="happy-outline" size={22} color={Colors.secondary} />
-            <Text style={styles.childEntryButtonText}>Soy hijo o hija</Text>
-          </TouchableOpacity>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>¿Ya tienes cuenta?</Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-              <Text style={styles.footerLink}>Inicia Sesión</Text>
-            </TouchableOpacity>
-          </View>
+          />
+          <Text style={[Type.caption, styles.center]}>Entras con el código de familia, sin correo.</Text>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      ) : null}
+
+      <Text style={[Type.body, styles.center]}>
+        ¿Ya tienes cuenta?{' '}
+        <Text style={styles.inlineLink} onPress={() => router.push('/(auth)/login')}>
+          Inicia sesión
+        </Text>
+      </Text>
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 56,
-  },
-  flagStripe: {
-    marginHorizontal: -24,
-    marginBottom: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  header: {
-    marginBottom: 32,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-  },
-  form: {
-    gap: 20,
-  },
-  inputContainer: {
-    gap: 8,
+  card: {
+    gap: Spacing.lg,
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.text,
+    marginBottom: Spacing.sm,
   },
-  inputWrapper: {
+  hint: {
+    marginTop: Spacing.sm,
+  },
+  genderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 16,
-    height: 52,
-    gap: 12,
+    gap: Spacing.md,
   },
-  inputError: {
+  genderCard: {
+    flex: 1,
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.sm + 2,
+    borderRadius: Radius.xl,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  genderCardActive: {
+    borderColor: Colors.primary,
+    backgroundColor: '#F2F7FF',
+  },
+  genderAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+  },
+  genderLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+  },
+  genderLabelActive: {
+    color: Colors.primaryDark,
+  },
+  checkDot: {
+    position: 'absolute',
+    top: Spacing.sm,
+    right: Spacing.sm,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choices: {
+    gap: Spacing.sm + 2,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+  },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: Colors.borderDark,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  checkboxError: {
     borderColor: Colors.error,
   },
-  input: {
+  legalAccept: {
     flex: 1,
-    fontSize: 16,
-    color: Colors.text,
+    lineHeight: 20,
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
   },
   errorText: {
-    fontSize: 12,
+    ...Type.caption,
     color: Colors.error,
+    fontWeight: '600',
   },
-  hintText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 4,
+  childBlock: {
+    gap: Spacing.sm,
   },
-  legalAccept: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 20,
-    marginTop: 4,
+  center: {
+    textAlign: 'center',
   },
-  legalInlineLink: {
-    fontSize: 13,
+  inlineLink: {
     color: Colors.primary,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  submitButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    color: Colors.white,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  childEntryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: Colors.secondary,
-    backgroundColor: Colors.surface,
-    marginTop: 8,
-  },
-  childEntryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.secondary,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 16,
-  },
-  footerText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  footerLink: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

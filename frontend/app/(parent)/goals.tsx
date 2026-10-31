@@ -6,15 +6,16 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  ActivityIndicator,
   Alert,
-  Modal,
   TextInput,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { goalsAPI, childrenAPI, savingsGoalsAPI, SavingsGoalDTO } from '../../src/services/api';
 import { ParentSavingsGoalsSection } from '../../src/components/SavingsGoalsSections';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
+import ParentScreenShell, { ParentHeaderAddButton } from '../../src/components/ParentScreenShell';
+import AccordionSection from '../../src/components/AccordionSection';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -368,44 +369,31 @@ export default function GoalsScreen() {
     return Math.min((goal.completed_tasks / goal.target_tasks) * 100, 100);
   };
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
-
   const activeGoals = goals.filter((g) => !g.is_completed);
   const completedGoals = goals.filter((g) => g.is_completed);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>Metas y Bonos</Text>
-          {goalTab === 'tasks' ? (
-            <TouchableOpacity style={styles.addButton} onPress={openNewGoalOptions}>
-              <Ionicons name="add" size={24} color={Colors.white} />
-            </TouchableOpacity>
-          ) : (
-            <View style={{ width: 44 }} />
-          )}
-        </View>
-        <View style={styles.segment}>
-          <TouchableOpacity
-            style={[styles.segmentChip, goalTab === 'tasks' && styles.segmentChipActive]}
-            onPress={() => setGoalTab('tasks')}
-          >
-            <Text style={[styles.segmentText, goalTab === 'tasks' && styles.segmentTextActive]}>Por tareas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.segmentChip, goalTab === 'savings' && styles.segmentChipActive]}
-            onPress={() => setGoalTab('savings')}
-          >
-            <Text style={[styles.segmentText, goalTab === 'savings' && styles.segmentTextActive]}>Ahorro</Text>
-          </TouchableOpacity>
-        </View>
+    <ParentScreenShell
+      title="Metas y Bonos"
+      loading={isLoading}
+      showBack
+      headerRight={
+        goalTab === 'tasks' ? <ParentHeaderAddButton onPress={openNewGoalOptions} /> : undefined
+      }
+    >
+      <View style={styles.segment}>
+        <TouchableOpacity
+          style={[styles.segmentChip, goalTab === 'tasks' && styles.segmentChipActive]}
+          onPress={() => setGoalTab('tasks')}
+        >
+          <Text style={[styles.segmentText, goalTab === 'tasks' && styles.segmentTextActive]}>Por tareas</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segmentChip, goalTab === 'savings' && styles.segmentChipActive]}
+          onPress={() => setGoalTab('savings')}
+        >
+          <Text style={[styles.segmentText, goalTab === 'savings' && styles.segmentTextActive]}>Ahorro</Text>
+        </TouchableOpacity>
       </View>
 
       {goalTab === 'savings' ? (
@@ -501,8 +489,11 @@ export default function GoalsScreen() {
 
             {/* Completed Goals */}
             {completedGoals.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Metas Completadas</Text>
+              <AccordionSection
+                title="Metas completadas"
+                count={completedGoals.length}
+                defaultOpen={completedGoals.some((g) => !g.bonus_paid)}
+              >
                 {completedGoals.map((goal) => (
                   <View key={goal.id} style={[styles.goalCard, styles.completedCard]}>
                     <View style={styles.goalHeader}>
@@ -536,284 +527,223 @@ export default function GoalsScreen() {
                     </View>
                   </View>
                 ))}
-              </View>
+              </AccordionSection>
             )}
           </>
         )}
       </ScrollView>
       )}
 
-      {/* Create Goal Modal */}
-      <Modal
+      <AppModal
         visible={showModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowModal(false)}
+        onClose={() => setShowModal(false)}
+        title="Nueva Meta"
+        icon="trophy"
+        iconTone="secondary"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowModal(false)}
+            confirmLabel="Crear Meta"
+            onConfirm={handleCreateGoal}
+            confirming={saving}
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Nueva Meta</Text>
+        <Text style={modalFieldStyles.label}>Título *</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Ej: Semana productiva"
+          placeholderTextColor={Colors.textLight}
+          value={formData.title}
+          onChangeText={(text) => setFormData({ ...formData, title: text })}
+        />
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Título *</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Ej: Semana productiva"
-                placeholderTextColor={Colors.textLight}
-                value={formData.title}
-                onChangeText={(text) => setFormData({ ...formData, title: text })}
-              />
-            </View>
+        <Text style={modalFieldStyles.label}>Descripción</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="Descripción de la meta..."
+          placeholderTextColor={Colors.textLight}
+          value={formData.description}
+          onChangeText={(text) => setFormData({ ...formData, description: text })}
+          multiline
+        />
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Descripción</Text>
-              <TextInput
-                style={[styles.textInput, styles.textArea]}
-                placeholder="Descripción de la meta..."
-                placeholderTextColor={Colors.textLight}
-                value={formData.description}
-                onChangeText={(text) => setFormData({ ...formData, description: text })}
-                multiline
-              />
-            </View>
-
-            <View style={styles.inputRow}>
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>Tareas Objetivo *</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="5"
-                  placeholderTextColor={Colors.textLight}
-                  value={formData.target_tasks}
-                  onChangeText={(text) => setFormData({ ...formData, target_tasks: text })}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.inputLabel}>Bono ({family?.currency}) *</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="50"
-                  placeholderTextColor={Colors.textLight}
-                  value={formData.bonus_amount}
-                  onChangeText={(text) => setFormData({ ...formData, bonus_amount: text })}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Tipo de meta</Text>
-              <View style={styles.periodRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.periodChip,
-                    formData.goal_period === 'semanal' && styles.periodChipActive,
-                  ]}
-                  onPress={() => setFormData({ ...formData, goal_period: 'semanal' })}
-                >
-                  <Text
-                    style={[
-                      styles.periodChipText,
-                      formData.goal_period === 'semanal' && styles.periodChipTextActive,
-                    ]}
-                  >
-                    Semanal
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.periodChip,
-                    formData.goal_period === 'personalizado' && styles.periodChipActive,
-                  ]}
-                  onPress={() => setFormData({ ...formData, goal_period: 'personalizado' })}
-                >
-                  <Text
-                    style={[
-                      styles.periodChipText,
-                      formData.goal_period === 'personalizado' && styles.periodChipTextActive,
-                    ]}
-                  >
-                    Personalizado
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Asignar a *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.childSelector}>
-                  {children.map((child) => (
-                    <TouchableOpacity
-                      key={child.id}
-                      style={[
-                        styles.childOption,
-                        selectedChildId === child.id && styles.childOptionActive,
-                      ]}
-                      onPress={() => setSelectedChildId(child.id)}
-                    >
-                      <Text
-                        style={[
-                          styles.childOptionText,
-                          selectedChildId === child.id && styles.childOptionTextActive,
-                        ]}
-                      >
-                        {child.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.buttonDisabled]}
-                onPress={handleCreateGoal}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Crear Meta</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+        <View style={styles.inputRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={modalFieldStyles.label}>Tareas Objetivo *</Text>
+            <TextInput
+              style={modalFieldStyles.input}
+              placeholder="5"
+              placeholderTextColor={Colors.textLight}
+              value={formData.target_tasks}
+              onChangeText={(text) => setFormData({ ...formData, target_tasks: text })}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={modalFieldStyles.label}>Bono ({family?.currency}) *</Text>
+            <TextInput
+              style={modalFieldStyles.input}
+              placeholder="50"
+              placeholderTextColor={Colors.textLight}
+              value={formData.bonus_amount}
+              onChangeText={(text) => setFormData({ ...formData, bonus_amount: text })}
+              keyboardType="decimal-pad"
+            />
           </View>
         </View>
-      </Modal>
 
-      {/* Metas predefinidas */}
-      <Modal
-        visible={showPredefinedModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowPredefinedModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.predefinedModalContent}>
-            <View style={styles.predefinedModalHeader}>
-              <Text style={styles.predefinedHeaderTitle}>Nueva meta</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowPredefinedModal(false)}
-              >
-                <Ionicons name="close" size={24} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.predefinedSubtitle}>
-              Elige una plantilla o crea una meta personalizada
-            </Text>
-
-            <TouchableOpacity
-              style={styles.customTaskButton}
-              onPress={() => {
-                setShowPredefinedModal(false);
-                setShowModal(true);
-              }}
+        <Text style={modalFieldStyles.label}>Tipo de meta</Text>
+        <View style={styles.periodRow}>
+          <TouchableOpacity
+            style={[
+              styles.periodChip,
+              formData.goal_period === 'semanal' && styles.periodChipActive,
+            ]}
+            onPress={() => setFormData({ ...formData, goal_period: 'semanal' })}
+          >
+            <Text
+              style={[
+                styles.periodChipText,
+                formData.goal_period === 'semanal' && styles.periodChipTextActive,
+              ]}
             >
-              <View style={styles.customTaskIcon}>
-                <Ionicons name="create-outline" size={24} color={Colors.white} />
-              </View>
-              <View style={styles.customTaskInfo}>
-                <Text style={styles.customTaskTitle}>Meta personalizada</Text>
-                <Text style={styles.customTaskDesc}>Define título, tareas objetivo y bono</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
-            </TouchableOpacity>
-
-            <Text style={styles.predefinedSectionTitle}>Metas y bonos sugeridos</Text>
-
-            <ScrollView style={styles.predefinedList} showsVerticalScrollIndicator={false}>
-              {predefinedGoals.map((preset, index) => (
-                <TouchableOpacity
-                  key={`${preset.title}-${index}`}
-                  style={styles.predefinedItem}
-                  onPress={() => selectPredefinedGoal(preset)}
-                >
-                  <View
-                    style={[
-                      styles.predefinedIcon,
-                      {
-                        backgroundColor:
-                          index % 3 === 0
-                            ? Colors.primary + '20'
-                            : index % 3 === 1
-                              ? Colors.secondary + '20'
-                              : Colors.accent + '20',
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={preset.icon as React.ComponentProps<typeof Ionicons>['name']}
-                      size={22}
-                      color={
-                        index % 3 === 0
-                          ? Colors.primary
-                          : index % 3 === 1
-                            ? Colors.secondary
-                            : Colors.accent
-                      }
-                    />
-                  </View>
-                  <View style={styles.predefinedInfo}>
-                    <Text style={styles.predefinedTitle}>{preset.title}</Text>
-                    <Text style={styles.predefinedDesc} numberOfLines={2}>
-                      {preset.description}
-                    </Text>
-                    <Text style={styles.predefinedPeriod}>
-                      {preset.goal_period === 'semanal' ? 'Semanal' : 'Personalizado'}
-                    </Text>
-                  </View>
-                  <View style={styles.predefinedGoalMeta}>
-                    <Text style={styles.predefinedGoalTasks}>{preset.target_tasks} tareas</Text>
-                    <Text style={styles.predefinedGoalBonus}>
-                      {family?.currency} {preset.bonus_amount}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+              Semanal
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.periodChip,
+              formData.goal_period === 'personalizado' && styles.periodChipActive,
+            ]}
+            onPress={() => setFormData({ ...formData, goal_period: 'personalizado' })}
+          >
+            <Text
+              style={[
+                styles.periodChipText,
+                formData.goal_period === 'personalizado' && styles.periodChipTextActive,
+              ]}
+            >
+              Personalizado
+            </Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
-    </View>
+
+        <Text style={modalFieldStyles.label}>Asignar a *</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.childSelector}>
+            {children.map((child) => (
+              <TouchableOpacity
+                key={child.id}
+                style={[
+                  styles.childOption,
+                  selectedChildId === child.id && styles.childOptionActive,
+                ]}
+                onPress={() => setSelectedChildId(child.id)}
+              >
+                <Text
+                  style={[
+                    styles.childOptionText,
+                    selectedChildId === child.id && styles.childOptionTextActive,
+                  ]}
+                >
+                  {child.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      </AppModal>
+
+      <AppModal
+        visible={showPredefinedModal}
+        onClose={() => setShowPredefinedModal(false)}
+        title="Nueva meta"
+        subtitle="Elige una plantilla o crea una meta personalizada"
+        icon="ribbon"
+        iconTone="secondary"
+        size="lg"
+      >
+        <TouchableOpacity
+          style={styles.customTaskButton}
+          onPress={() => {
+            setShowPredefinedModal(false);
+            setShowModal(true);
+          }}
+        >
+          <View style={styles.customTaskIcon}>
+            <Ionicons name="create-outline" size={24} color={Colors.white} />
+          </View>
+          <View style={styles.customTaskInfo}>
+            <Text style={styles.customTaskTitle}>Meta personalizada</Text>
+            <Text style={styles.customTaskDesc}>Define título, tareas objetivo y bono</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+        </TouchableOpacity>
+
+        <Text style={styles.predefinedSectionTitle}>Metas y bonos sugeridos</Text>
+
+        {predefinedGoals.map((preset, index) => (
+          <TouchableOpacity
+            key={`${preset.title}-${index}`}
+            style={styles.predefinedItem}
+            onPress={() => selectPredefinedGoal(preset)}
+          >
+            <View
+              style={[
+                styles.predefinedIcon,
+                {
+                  backgroundColor:
+                    index % 3 === 0
+                      ? Colors.primary + '20'
+                      : index % 3 === 1
+                        ? Colors.secondary + '20'
+                        : Colors.accent + '20',
+                },
+              ]}
+            >
+              <Ionicons
+                name={preset.icon as React.ComponentProps<typeof Ionicons>['name']}
+                size={22}
+                color={
+                  index % 3 === 0
+                    ? Colors.primary
+                    : index % 3 === 1
+                      ? Colors.secondary
+                      : Colors.accent
+                }
+              />
+            </View>
+            <View style={styles.predefinedInfo}>
+              <Text style={styles.predefinedTitle}>{preset.title}</Text>
+              <Text style={styles.predefinedDesc} numberOfLines={2}>
+                {preset.description}
+              </Text>
+              <Text style={styles.predefinedPeriod}>
+                {preset.goal_period === 'semanal' ? 'Semanal' : 'Personalizado'}
+              </Text>
+            </View>
+            <View style={styles.predefinedGoalMeta}>
+              <Text style={styles.predefinedGoalTasks}>{preset.target_tasks} tareas</Text>
+              <Text style={styles.predefinedGoalBonus}>
+                {family?.currency} {preset.bonus_amount}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </AppModal>
+    </ParentScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-  },
-  header: {
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: Colors.surface,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   segment: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 14,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
   },
   segmentChip: {
     flex: 1,
@@ -839,19 +769,6 @@ const styles = StyleSheet.create({
   savingsWrap: {
     flex: 1,
     padding: 16,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   content: {
     flex: 1,
@@ -996,27 +913,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.onSecondary,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
   inputRow: {
     flexDirection: 'row',
     gap: 12,
@@ -1024,6 +920,7 @@ const styles = StyleSheet.create({
   periodRow: {
     flexDirection: 'row',
     gap: 10,
+    marginBottom: 12,
   },
   periodChip: {
     paddingHorizontal: 16,
@@ -1044,25 +941,6 @@ const styles = StyleSheet.create({
   },
   periodChipTextActive: {
     color: Colors.white,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  textArea: {
-    minHeight: 70,
-    textAlignVertical: 'top',
   },
   childSelector: {
     flexDirection: 'row',
@@ -1087,64 +965,6 @@ const styles = StyleSheet.create({
   childOptionTextActive: {
     color: Colors.white,
     fontWeight: '600',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  saveButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  predefinedModalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: '85%',
-  },
-  predefinedModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  predefinedHeaderTitle: {
-    flex: 1,
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  closeButton: {
-    padding: 8,
-  },
-  predefinedSubtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 20,
   },
   customTaskButton: {
     flexDirection: 'row',
@@ -1185,9 +1005,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  },
-  predefinedList: {
-    maxHeight: 400,
   },
   predefinedItem: {
     flexDirection: 'row',
@@ -1239,7 +1056,7 @@ const styles = StyleSheet.create({
   predefinedGoalBonus: {
     fontSize: 15,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: Colors.secondaryInk,
     marginTop: 2,
   },
 });

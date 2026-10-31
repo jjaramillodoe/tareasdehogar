@@ -23,7 +23,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     width: '100%',
     overflow: 'hidden',
-    borderRadius: 4,
+    borderRadius: 6,
   },
   yellow: {
     flex: 2,

@@ -6,13 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { notificationsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import ParentScreenShell from '../../src/components/ParentScreenShell';
+import { shadow } from '../../src/utils/shadow';
+
 
 interface Notification {
   id: string;
@@ -26,21 +28,21 @@ interface Notification {
 const getNotificationIcon = (type: string) => {
   switch (type) {
     case 'task_approved':
-      return { name: 'checkmark-circle', color: Colors.success };
+      return { name: 'checkmark-circle' as const, color: Colors.success };
     case 'task_completed':
-      return { name: 'clipboard', color: Colors.primary };
+      return { name: 'clipboard' as const, color: Colors.primary };
     case 'goal_achieved':
-      return { name: 'flag', color: Colors.secondary };
+      return { name: 'flag' as const, color: Colors.secondaryInk };
     case 'goal_created':
-      return { name: 'flag-outline', color: Colors.primary };
+      return { name: 'flag' as const, color: Colors.primary };
     case 'achievement':
-      return { name: 'trophy', color: Colors.secondary };
+      return { name: 'trophy' as const, color: Colors.secondaryInk };
     case 'bonus_paid':
-      return { name: 'gift', color: Colors.success };
+      return { name: 'gift' as const, color: Colors.success };
     case 'streak':
-      return { name: 'flame', color: Colors.accent };
+      return { name: 'flame' as const, color: Colors.accent };
     default:
-      return { name: 'notifications', color: Colors.primary };
+      return { name: 'notifications' as const, color: Colors.primary };
   }
 };
 
@@ -97,7 +99,9 @@ export default function NotificationsScreen() {
 
   const toggleSelected = (notificationId: string) => {
     setSelectedIds((prev) =>
-      prev.includes(notificationId) ? prev.filter((x) => x !== notificationId) : [...prev, notificationId]
+      prev.includes(notificationId)
+        ? prev.filter((x) => x !== notificationId)
+        : [...prev, notificationId]
     );
   };
 
@@ -157,27 +161,31 @@ export default function NotificationsScreen() {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  const subtitle =
+    unreadCount > 0
+      ? `${unreadCount} sin leer · ${notifications.length} total`
+      : notifications.length === 0
+        ? 'Todo al día'
+        : `${notifications.length} notificación${notifications.length === 1 ? '' : 'es'}`;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Notificaciones</Text>
-          {unreadCount > 0 && (
-            <Text style={styles.unreadCount}>{unreadCount} sin leer</Text>
-          )}
-        </View>
-      </View>
+    <ParentScreenShell
+      title="Alertas"
+      subtitle={subtitle}
+      loading={isLoading}
+      showBack
+      headerRight={
+        unreadCount > 0 ? (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+          </View>
+        ) : undefined
+      }
+    >
       <View style={styles.actionsRow}>
         {!selectionMode ? (
           <TouchableOpacity style={styles.ghostButton} onPress={() => setSelectionMode(true)}>
+            <Ionicons name="checkbox-outline" size={15} color={Colors.textSecondary} />
             <Text style={styles.ghostButtonText}>Seleccionar</Text>
           </TouchableOpacity>
         ) : (
@@ -191,22 +199,25 @@ export default function NotificationsScreen() {
             <Text style={styles.ghostButtonText}>Cancelar</Text>
           </TouchableOpacity>
         )}
-        {unreadCount > 0 && (
+        {unreadCount > 0 ? (
           <TouchableOpacity style={styles.markAllButton} onPress={handleMarkAllRead}>
+            <Ionicons name="checkmark-done" size={15} color={Colors.primary} />
             <Text style={styles.markAllButtonText}>Marcar leídas</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
         {selectionMode ? (
           <TouchableOpacity
             style={[styles.deleteButton, selectedIds.length === 0 && styles.buttonDisabled]}
             onPress={handleDeleteSelected}
             disabled={selectedIds.length === 0}
           >
+            <Ionicons name="trash" size={14} color={Colors.accentDark} />
             <Text style={styles.deleteButtonText}>Eliminar ({selectedIds.length})</Text>
           </TouchableOpacity>
         ) : (
           notifications.length > 0 && (
             <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAll}>
+              <Ionicons name="trash" size={14} color={Colors.accentDark} />
               <Text style={styles.deleteButtonText}>Eliminar todas</Text>
             </TouchableOpacity>
           )
@@ -215,6 +226,8 @@ export default function NotificationsScreen() {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentInner}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -222,25 +235,30 @@ export default function NotificationsScreen() {
               setRefreshing(true);
               loadNotifications();
             }}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
       >
         {notifications.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-off-outline" size={64} color={Colors.textLight} />
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="notifications-off" size={34} color={Colors.primary} />
+            </View>
             <Text style={styles.emptyText}>No hay notificaciones</Text>
-            <Text style={styles.emptySubtext}>Las notificaciones aparecerán aquí</Text>
+            <Text style={styles.emptySubtext}>Las alertas de la familia aparecerán aquí</Text>
           </View>
         ) : (
           notifications.map((notification) => {
             const icon = getNotificationIcon(notification.type);
+            const selected = selectionMode && selectedIds.includes(notification.id);
             return (
               <TouchableOpacity
                 key={notification.id}
                 style={[
                   styles.notificationCard,
                   !notification.is_read && styles.unreadCard,
-                  selectionMode && selectedIds.includes(notification.id) && styles.selectedCard,
+                  selected && styles.selectedCard,
                 ]}
                 onPress={() => {
                   if (selectionMode) {
@@ -255,14 +273,10 @@ export default function NotificationsScreen() {
                     setSelectedIds([notification.id]);
                   }
                 }}
+                activeOpacity={0.88}
               >
-                <View
-                  style={[
-                    styles.notificationIcon,
-                    { backgroundColor: icon.color + '20' },
-                  ]}
-                >
-                  <Ionicons name={icon.name as any} size={22} color={icon.color} />
+                <View style={[styles.notificationIcon, { backgroundColor: icon.color + '20' }]}>
+                  <Ionicons name={icon.name} size={22} color={icon.color} />
                 </View>
                 <View style={styles.notificationContent}>
                   <Text style={styles.notificationTitle}>{notification.title}</Text>
@@ -273,9 +287,9 @@ export default function NotificationsScreen() {
                 </View>
                 {selectionMode ? (
                   <Ionicons
-                    name={selectedIds.includes(notification.id) ? 'checkbox' : 'square-outline'}
+                    name={selected ? 'checkbox' : 'square-outline'}
                     size={22}
-                    color={selectedIds.includes(notification.id) ? Colors.primary : Colors.textLight}
+                    color={selected ? Colors.primary : Colors.textLight}
                   />
                 ) : (
                   !notification.is_read && <View style={styles.unreadDot} />
@@ -285,83 +299,79 @@ export default function NotificationsScreen() {
           })
         )}
       </ScrollView>
-    </View>
+    </ParentScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: Colors.surface,
-  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 8,
+    paddingTop: 12,
+    paddingBottom: 12,
     backgroundColor: Colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
+  unreadBadge: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
-  unreadCount: {
-    fontSize: 13,
-    color: Colors.primary,
-    marginTop: 2,
+  unreadBadgeText: {
+    color: Colors.white,
+    fontSize: 12,
+    fontWeight: '800',
   },
   markAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: Colors.primary + '20',
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.primary + '16',
   },
   markAllButtonText: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '700',
     color: Colors.primary,
   },
   ghostButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     backgroundColor: Colors.background,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: Colors.border,
   },
   ghostButtonText: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: '700',
     color: Colors.textSecondary,
   },
   deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: Colors.accent + '1f',
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.accent + '18',
   },
   deleteButtonText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.accentDark,
   },
   buttonDisabled: {
@@ -369,44 +379,65 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentInner: {
     padding: 16,
+    paddingBottom: 28,
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 48,
+    paddingHorizontal: 20,
+    backgroundColor: Colors.white,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor: Colors.primary + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.text,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
     color: Colors.textSecondary,
-    marginTop: 4,
+    marginTop: 6,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   notificationCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 18,
+    padding: 14,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'flex-start',
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 2, blur: 6, opacity: 0.05, elevation: 1 }),
+
   },
   unreadCard: {
-    backgroundColor: Colors.primary + '08',
-    borderWidth: 1,
-    borderColor: Colors.primary + '20',
+    backgroundColor: Colors.primary + '0c',
+    borderColor: Colors.primary + '40',
   },
   selectedCard: {
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: Colors.primary,
   },
   notificationIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 46,
+    height: 46,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -416,7 +447,7 @@ const styles = StyleSheet.create({
   },
   notificationTitle: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '800',
     color: Colors.text,
   },
   notificationMessage: {
@@ -424,11 +455,13 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 4,
     lineHeight: 20,
+    fontWeight: '500',
   },
   notificationTime: {
     fontSize: 12,
     color: Colors.textLight,
     marginTop: 6,
+    fontWeight: '600',
   },
   unreadDot: {
     width: 10,
@@ -436,5 +469,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: Colors.primary,
     marginLeft: 8,
+    marginTop: 4,
   },
 });

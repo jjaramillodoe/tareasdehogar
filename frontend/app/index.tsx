@@ -1,35 +1,81 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  Dimensions,
+  ScrollView,
+  Animated,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuthStore } from '../src/store/authStore';
-import { Colors } from '../src/constants/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuthStore } from '../src/store/authStore';
 import FlagStripe from '../src/components/FlagStripe';
+import Button from '../src/components/ui/Button';
+import Card from '../src/components/ui/Card';
+import IconTile from '../src/components/ui/IconTile';
+import { Colors, Elevation, Radius, Spacing, Tone, Type } from '../src/theme';
+import { hapticTap } from '../src/utils/feedback';
 
 const { width } = Dimensions.get('window');
 
+const STEPS: { key: string; title: string; desc: string; icon: 'clipboard' | 'wallet' | 'checkmark-done'; tone: Tone }[] = [
+  { key: 'tasks', title: 'Crea tareas', desc: 'Asigna lo de la casa a cada hijo', icon: 'clipboard', tone: 'primary' },
+  { key: 'pay', title: 'Define recompensas', desc: 'Acuerda el monto de cada tarea', icon: 'wallet', tone: 'secondary' },
+  { key: 'approve', title: 'Aprueba y paga', desc: 'Revisa, valida y registra el pago', icon: 'checkmark-done', tone: 'accent' },
+];
+
+type Href =
+  | '/(auth)/register'
+  | '/(auth)/login'
+  | '/(auth)/child-login'
+  | '/(public)/how-it-works'
+  | '/(public)/privacy'
+  | '/(public)/privacy-minors'
+  | '/(public)/terms';
+
 export default function WelcomeScreen() {
   const router = useRouter();
-  const { user, isInitialized, isChildSession, selectedChild } = useAuthStore();
+  const insets = useSafeAreaInsets();
+  const { user, token, isInitialized, isChildSession, selectedChild } = useAuthStore();
+
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(24)).current;
+  const logoScale = useRef(new Animated.Value(0.85)).current;
 
   useEffect(() => {
-    if (!isInitialized) return;
+    if (!isInitialized || !token) return;
     if (isChildSession && selectedChild) {
-      router.replace('/(child)/tasks');
+      router.replace('/(child)/home');
       return;
     }
     if (user) {
       router.replace('/(parent)/home');
     }
-  }, [isInitialized, user, isChildSession, selectedChild]);
+  }, [isInitialized, token, user, isChildSession, selectedChild, router]);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(slideUp, { toValue: 0, duration: 500, useNativeDriver: true }),
+      Animated.spring(logoScale, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }),
+    ]).start();
+  }, [fadeIn, slideUp, logoScale]);
+
+  const go = (href: Href) => router.push(href);
+
+  const enter = { opacity: fadeIn, transform: [{ translateY: slideUp }] };
 
   return (
     <View style={styles.container}>
-      {/* Background Decoration */}
-      <View style={styles.backgroundDecoration}>
-        <View style={[styles.decorCircle, styles.decorBlue]} />
-        <View style={[styles.decorCircle, styles.decorYellow]} />
-        <View style={[styles.decorCircle, styles.decorRed]} />
+      <View style={styles.backgroundDecoration} pointerEvents="none">
+        <View style={styles.decorBlue} />
+      </View>
+
+      <View style={{ paddingTop: insets.top }}>
+        <FlagStripe height={5} style={styles.flagFull} />
       </View>
 
       <ScrollView
@@ -37,117 +83,95 @@ export default function WelcomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <FlagStripe height={5} style={styles.flagStripe} />
-          <View style={styles.logoContainer}>
-            <View style={styles.logoCircle}>
-              <Ionicons name="people" size={48} color={Colors.white} />
+        <Animated.View style={[styles.header, enter]}>
+          <Animated.View style={[styles.logoContainer, { transform: [{ scale: logoScale }] }]}>
+            <View style={styles.logoRing}>
+              <View style={styles.logoCircle}>
+                <Ionicons name="people" size={40} color={Colors.white} />
+              </View>
             </View>
             <View style={styles.coinBadge}>
-              <Ionicons name="wallet" size={17} color={Colors.onSecondary} />
+              <Ionicons name="wallet" size={15} color={Colors.onSecondary} />
             </View>
-          </View>
-          <Text style={styles.title}>HabitApp</Text>
-          <Text style={styles.subtitle}>
-            Gestiona las tareas de tus hijos y recompénsalos por su esfuerzo
+          </Animated.View>
+
+          <Text style={Type.eyebrow}>Para familias</Text>
+          <Text style={[Type.display, styles.title]}>HabitApp</Text>
+          <Text style={[Type.body, styles.subtitle]}>
+            Tareas del hogar, recompensas y ahorro. Los padres aprueban; los hijos ganan.
+          </Text>
+        </Animated.View>
+
+        <Animated.View style={enter}>
+          <Card style={styles.stepsCard}>
+            <Text style={[Type.eyebrow, styles.stepsEyebrow]}>Así de simple</Text>
+            {STEPS.map((step, index) => (
+              <View key={step.key} style={[styles.stepRow, index > 0 && styles.stepRowDivided]}>
+                <IconTile icon={step.icon} tone={step.tone} size={44} badge={String(index + 1)} />
+                <View style={styles.stepText}>
+                  <Text style={Type.heading}>{step.title}</Text>
+                  <Text style={[Type.caption, styles.stepDesc]}>{step.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </Card>
+
+          <Pressable
+            onPress={() => {
+              void hapticTap();
+              go('/(public)/how-it-works');
+            }}
+            accessibilityRole="link"
+            style={({ pressed }) => [styles.guideLink, pressed && styles.guideLinkPressed]}
+          >
+            <Ionicons name="book-outline" size={16} color={Colors.primary} />
+            <Text style={styles.guideLinkText}>Ver cómo funciona en 5 pasos</Text>
+            <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
+          </Pressable>
+        </Animated.View>
+      </ScrollView>
+
+      <View style={[styles.ctaDock, { paddingBottom: Math.max(insets.bottom, Spacing.md) + Spacing.xs }]}>
+        <Button
+          label="Crear cuenta gratis"
+          icon="person-add"
+          size="lg"
+          onPress={() => go('/(auth)/register')}
+        />
+        <View style={styles.ctaRow}>
+          <Button
+            label="Iniciar sesión"
+            icon="log-in-outline"
+            variant="secondary"
+            fullWidth={false}
+            style={styles.ctaHalf}
+            onPress={() => go('/(auth)/login')}
+          />
+          <Button
+            label="Soy hijo/a"
+            icon="happy"
+            variant="kid"
+            fullWidth={false}
+            style={styles.ctaHalf}
+            accessibilityHint="Entrar con la cuenta de hijo o hija"
+            onPress={() => go('/(auth)/child-login')}
+          />
+        </View>
+
+        <View style={styles.legalRow}>
+          <Text style={styles.legalLink} onPress={() => go('/(public)/privacy')}>
+            Privacidad
+          </Text>
+          <Text style={styles.legalSep}>·</Text>
+          <Text style={styles.legalLink} onPress={() => go('/(public)/privacy-minors')}>
+            Menores
+          </Text>
+          <Text style={styles.legalSep}>·</Text>
+          <Text style={styles.legalLink} onPress={() => go('/(public)/terms')}>
+            Términos
           </Text>
         </View>
-
-        {/* Features */}
-        <View style={styles.features}>
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.primary + '22' }]}>
-              <Ionicons name="clipboard-outline" size={24} color={Colors.primary} />
-            </View>
-            <View style={styles.featureText}>
-              <Text style={styles.featureTitle}>Crea tareas</Text>
-              <Text style={styles.featureDesc}>Asigna tareas a tus hijos</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.secondary + '33' }]}>
-              <Ionicons name="wallet-outline" size={24} color={Colors.onSecondary} />
-            </View>
-            <View style={styles.featureText}>
-              <Text style={styles.featureTitle}>Define pagos</Text>
-              <Text style={styles.featureDesc}>Establece recompensas</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: Colors.accent + '22' }]}>
-              <Ionicons name="checkmark-done-circle" size={24} color={Colors.accent} />
-            </View>
-            <View style={styles.featureText}>
-              <Text style={styles.featureTitle}>Aprueba</Text>
-              <Text style={styles.featureDesc}>Valida y paga las tareas</Text>
-            </View>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.guideButton}
-          onPress={() => router.push('/(public)/how-it-works')}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="book-outline" size={22} color={Colors.primary} />
-          <Text style={styles.guideButtonText}>Cómo funciona la app</Text>
-          <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
-        </TouchableOpacity>
-
-        {/* Buttons */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => router.push('/(auth)/register')}
-          >
-            <Ionicons name="person-add-outline" size={22} color={Colors.white} />
-            <Text style={styles.primaryButtonText}>Crear Cuenta</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => router.push('/(auth)/login')}
-          >
-            <Ionicons name="log-in-outline" size={22} color={Colors.primary} />
-            <Text style={styles.secondaryButtonText}>Iniciar Sesión</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.childEntryButton}
-            onPress={() => router.push('/(auth)/child-login')}
-          >
-            <Ionicons name="happy-outline" size={22} color={Colors.black} />
-            <Text style={[styles.childEntryButtonText, { color: Colors.black }]}>Soy hijo/a</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Legal */}
-        <View style={styles.legalRow}>
-          <TouchableOpacity onPress={() => router.push('/(public)/privacy')}>
-            <Text style={styles.legalLink}>Privacidad</Text>
-          </TouchableOpacity>
-          <Text style={styles.legalSep}>·</Text>
-          <TouchableOpacity onPress={() => router.push('/(public)/privacy-minors')}>
-            <Text style={styles.legalLink}>Menores</Text>
-          </TouchableOpacity>
-          <Text style={styles.legalSep}>·</Text>
-          <TouchableOpacity onPress={() => router.push('/(public)/terms')}>
-            <Text style={styles.legalLink}>Términos</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <View style={styles.footerDots}>
-            <View style={[styles.footerDot, { backgroundColor: Colors.flagYellow }]} />
-            <View style={[styles.footerDot, { backgroundColor: Colors.flagBlue }]} />
-            <View style={[styles.footerDot, { backgroundColor: Colors.flagRed }]} />
-          </View>
-        </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -157,246 +181,148 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  backgroundDecoration: {
-    position: 'absolute',
+  flagFull: {
     width: '100%',
-    height: '100%',
+    borderRadius: 0,
   },
-  decorCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-    opacity: 0.1,
+  backgroundDecoration: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
   },
   decorBlue: {
-    width: width * 0.7,
-    height: width * 0.7,
-    backgroundColor: Colors.flagBlue,
-    top: -width * 0.2,
-    right: -width * 0.2,
-  },
-  decorYellow: {
-    width: width * 0.5,
-    height: width * 0.5,
-    backgroundColor: Colors.flagYellow,
-    top: '40%',
-    left: -width * 0.2,
-  },
-  decorRed: {
-    width: width * 0.4,
-    height: width * 0.4,
-    backgroundColor: Colors.flagRed,
-    bottom: -width * 0.1,
-    right: -width * 0.1,
+    position: 'absolute',
+    width: width * 0.9,
+    height: width * 0.9,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.primarySoft,
+    top: -width * 0.3,
+    right: -width * 0.3,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 32,
-  },
-  guideButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: Colors.surface,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: Colors.primary + '44',
-  },
-  guideButtonText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
+    paddingHorizontal: Spacing.xxl,
+    paddingTop: Spacing.xxl,
+    paddingBottom: Spacing.lg,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
-  },
-  flagStripe: {
-    width: '72%',
-    maxWidth: 280,
-    marginBottom: 16,
+    marginBottom: Spacing.xxl,
   },
   logoContainer: {
-    position: 'relative',
-    marginBottom: 20,
+    width: 92,
+    height: 92,
+    marginBottom: Spacing.lg,
+  },
+  logoRing: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    padding: Spacing.xs,
+    backgroundColor: Colors.white,
+    ...Elevation.raised,
   },
   logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    flex: 1,
+    borderRadius: 42,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 10,
   },
   coinBadge: {
     position: 'absolute',
-    bottom: -4,
-    right: -4,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.secondary,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: Colors.background,
-    shadowColor: Colors.secondary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
+    borderColor: Colors.white,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 12,
-    textAlign: 'center',
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
-    fontSize: 15,
-    color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 20,
+    maxWidth: 320,
   },
-  features: {
-    backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 32,
-    shadowColor: Colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+  stepsCard: {
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xs,
   },
-  featureItem: {
+  stepsEyebrow: {
+    marginBottom: Spacing.xs,
+  },
+  stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    gap: Spacing.md + 2,
+    paddingVertical: Spacing.md,
   },
-  featureIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
+  stepRowDivided: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
-  featureText: {
-    marginLeft: 16,
+  stepText: {
     flex: 1,
   },
-  featureTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
+  stepDesc: {
+    marginTop: 1,
   },
-  featureDesc: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  buttonContainer: {
-    gap: 12,
-  },
-  primaryButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
+  guideLink: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    color: Colors.white,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    backgroundColor: Colors.white,
-    paddingVertical: 16,
-    borderRadius: 14,
     alignItems: 'center',
-    flexDirection: 'row',
     justifyContent: 'center',
-    gap: 10,
-    borderWidth: 2,
-    borderColor: Colors.primary,
+    gap: Spacing.xs + 2,
+    alignSelf: 'center',
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
   },
-  secondaryButtonText: {
+  guideLinkPressed: {
+    backgroundColor: Colors.primarySoft,
+  },
+  guideLinkText: {
+    fontSize: 14,
+    fontWeight: '700',
     color: Colors.primary,
-    fontSize: 17,
-    fontWeight: '600',
   },
-  childEntryButton: {
-    backgroundColor: Colors.secondary,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
+  ctaDock: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderDark,
+    gap: Spacing.sm + 2,
+  },
+  ctaRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
-    borderWidth: 2,
-    borderColor: Colors.secondaryDark,
+    gap: Spacing.sm + 2,
   },
-  childEntryButtonText: {
-    color: Colors.secondary,
-    fontSize: 17,
-    fontWeight: '600',
+  ctaHalf: {
+    flex: 1,
   },
   legalRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 16,
-    gap: 4,
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   legalLink: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    color: Colors.primary,
-    textDecorationLine: 'underline',
+    color: Colors.textSecondary,
+    paddingVertical: Spacing.xs,
   },
   legalSep: {
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.textLight,
-    marginHorizontal: 2,
-  },
-  footer: {
-    alignItems: 'center',
-    paddingBottom: 12,
-    paddingTop: 8,
-  },
-  footerDots: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  footerDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
 });

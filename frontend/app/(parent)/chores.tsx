@@ -8,12 +8,14 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
-  Modal,
   TextInput,
   Platform,
+  Pressable,
+  Image,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/store/authStore';
 import { choresAPI, childrenAPI, savingsGoalsAPI, SavingsSplitPreviewDTO, SavingsGoalDTO } from '../../src/services/api';
 import { SavingsSplitPreviewBox } from '../../src/components/SavingsSplitPreviewBox';
@@ -22,13 +24,25 @@ import {
   buildSavingsApproveOpts,
   ApproveSavingsMode,
 } from '../../src/components/ApproveSavingsControls';
-import { Colors } from '../../src/constants/colors';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
 import { Ionicons } from '@expo/vector-icons';
+import ParentScreenShell, { ParentHeaderAddButton } from '../../src/components/ParentScreenShell';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import Chip from '../../src/components/ui/Chip';
+import IconTile from '../../src/components/ui/IconTile';
+import Notice from '../../src/components/ui/Notice';
+import SquareIconButton from '../../src/components/ui/SquareIconButton';
+import { Colors, Radius, Spacing, Tone, Type } from '../../src/theme';
+import { getChildAvatarSource } from '../../src/utils/avatars';
+import { shadow } from '../../src/utils/shadow';
+
 
 interface Child {
   id: string;
   name: string;
   age: number;
+  gender?: 'mujer' | 'hombre' | null;
   savings_on_approve_percent?: number;
   savings_on_approve_goal_id?: string | null;
 }
@@ -61,6 +75,12 @@ const statusColors: Record<string, string> = {
   rechazada: Colors.error,
 };
 
+const statusTones: Record<string, Tone> = {
+  pendiente: 'neutral',
+  completada: 'warning',
+  aprobada: 'success',
+  rechazada: 'accent',
+};
 const frequencyLabels: Record<string, string> = {
   unica: 'Única',
   diaria: 'Diaria',
@@ -140,6 +160,7 @@ const predefinedChores = [
 
 export default function ChoresScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { family } = useAuthStore();
   const [chores, setChores] = useState<Chore[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
@@ -171,6 +192,7 @@ export default function ChoresScreen() {
   const [approveSavingsPercentStr, setApproveSavingsPercentStr] = useState('0');
   const [approveSavingsAmountStr, setApproveSavingsAmountStr] = useState('');
   const [approveSavingsGoalId, setApproveSavingsGoalId] = useState('');
+  const [approveSavingsReasonNote, setApproveSavingsReasonNote] = useState('');
 
   const loadData = async () => {
     try {
@@ -208,6 +230,7 @@ export default function ChoresScreen() {
     setApproveSavingsPercentStr(String(pct));
     setApproveSavingsAmountStr('');
     setApproveSavingsGoalId('');
+    setApproveSavingsReasonNote('');
     let cancelled = false;
     savingsGoalsAPI
       .getAll(confirmApproveChore.completed_by)
@@ -281,7 +304,10 @@ export default function ChoresScreen() {
         approveSavingsAmountStr,
         approveSavingsGoalId
       );
-      await choresAPI.approve(confirmApproveChore.id, savingsOpts);
+      await choresAPI.approve(confirmApproveChore.id, {
+        ...savingsOpts,
+        savings_reason_note: approveSavingsReasonNote.trim() || undefined,
+      });
       setConfirmApproveChore(null);
       Alert.alert('Éxito', 'Tarea aprobada y pago realizado');
       loadData();
@@ -492,78 +518,85 @@ export default function ChoresScreen() {
     ? chores.filter((c) => c.status === filter)
     : chores;
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      pendiente: 0,
+      completada: 0,
+      aprobada: 0,
+      rechazada: 0,
+    };
+    for (const c of chores) {
+      if (counts[c.status] != null) counts[c.status] += 1;
+    }
+    return counts;
+  }, [chores]);
+
+  const pendingReviewCount = statusCounts.completada;
+
   if (!family) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Tareas</Text>
+      <ParentScreenShell title="Tareas" subtitle="Asigna y aprueba recompensas">
+        <View style={styles.contentInner}>
+          <Card style={styles.emptyCard}>
+            <IconTile icon="home" size={64} />
+            <Text style={[Type.heading, styles.center]}>Primero debes crear una familia</Text>
+            <Button
+              label="Ir a Inicio"
+              variant="secondary"
+              style={styles.emptyButton}
+              onPress={() => router.push('/(parent)/home')}
+            />
+          </Card>
         </View>
-        <View style={styles.noFamilyContainer}>
-          <Ionicons name="home-outline" size={64} color={Colors.textLight} />
-          <Text style={styles.noFamilyText}>Primero debes crear una familia</Text>
-          <TouchableOpacity
-            style={styles.goHomeButton}
-            onPress={() => router.push('/(parent)/home')}
-          >
-            <Text style={styles.goHomeButtonText}>Ir a Inicio</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
+      </ParentScreenShell>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tareas</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={openNewChoreOptions}
-        >
-          <Ionicons name="add" size={24} color={Colors.white} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Filter Tabs */}
+    <ParentScreenShell
+      title="Tareas"
+      subtitle={
+        isLoading
+          ? 'Cargando…'
+          : chores.length === 0
+            ? 'Crea la primera tarea familiar'
+            : pendingReviewCount > 0
+              ? `${pendingReviewCount} por aprobar · ${chores.length} total`
+              : `${chores.length} tarea${chores.length === 1 ? '' : 's'} en total`
+      }
+      loading={isLoading}
+      headerRight={<ParentHeaderAddButton onPress={openNewChoreOptions} />}
+    >
       <View style={styles.filterContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <TouchableOpacity
-            style={[styles.filterTab, !filter && styles.filterTabActive]}
-            onPress={() => setFilter(null)}
-          >
-            <Text style={[styles.filterTabText, !filter && styles.filterTabTextActive]}>
-              Todas ({chores.length})
-            </Text>
-          </TouchableOpacity>
-          {['pendiente', 'completada', 'aprobada', 'rechazada'].map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[styles.filterTab, filter === status && styles.filterTabActive]}
-              onPress={() => setFilter(status)}
-            >
-              <Text
-                style={[
-                  styles.filterTabText,
-                  filter === status && styles.filterTabTextActive,
-                ]}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+          {([null, 'pendiente', 'completada', 'aprobada', 'rechazada'] as const).map((status) => {
+            const active = filter === status;
+            const count = status ? statusCounts[status] : chores.length;
+            return (
+              <Pressable
+                key={status ?? 'all'}
+                style={[styles.filterTab, active && styles.filterTabActive]}
+                onPress={() => setFilter(status)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
               >
-                {statusLabels[status]} ({chores.filter((c) => c.status === status).length})
-              </Text>
-            </TouchableOpacity>
-          ))}
+                {status ? (
+                  <View style={[styles.filterDot, { backgroundColor: active ? Colors.white : statusColors[status] }]} />
+                ) : null}
+                <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>
+                  {status ? statusLabels[status] : 'Todas'}
+                </Text>
+                <Text style={[styles.filterCount, active && styles.filterCountActive]}>{count}</Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </View>
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentInner}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -571,836 +604,596 @@ export default function ChoresScreen() {
               setRefreshing(true);
               loadData();
             }}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
       >
         {children.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={64} color={Colors.textLight} />
-            <Text style={styles.emptyText}>Primero agrega hijos</Text>
-            <Text style={styles.emptySubtext}>
-              Necesitas hijos registrados para asignar tareas
-            </Text>
-            <TouchableOpacity
-              style={styles.goChildrenButton}
+          <Card style={styles.emptyCard}>
+            <IconTile icon="people" size={64} />
+            <Text style={[Type.heading, styles.center]}>Primero agrega hijos</Text>
+            <Text style={[Type.body, styles.center]}>Necesitas hijos registrados para asignar tareas.</Text>
+            <Button
+              label="Ir a Hijos"
+              variant="secondary"
+              style={styles.emptyButton}
               onPress={() => router.push('/(parent)/children')}
-            >
-              <Text style={styles.goChildrenButtonText}>Ir a Hijos</Text>
-            </TouchableOpacity>
-          </View>
+            />
+          </Card>
         ) : filteredChores.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="list-outline" size={64} color={Colors.textLight} />
-            <Text style={styles.emptyText}>
+          <Card style={styles.emptyCard}>
+            <IconTile icon="clipboard" size={64} />
+            <Text style={[Type.heading, styles.center]}>
               {filter ? 'No hay tareas con este estado' : 'Aún no hay tareas'}
             </Text>
-            <Text style={styles.emptySubtext}>Crea tareas para tus hijos</Text>
-            {!filter && (
-              <TouchableOpacity
-                style={styles.addFirstButton}
+            <Text style={[Type.body, styles.center]}>
+              {filter ? 'Prueba con otro filtro.' : 'Crea tareas para tus hijos.'}
+            </Text>
+            {!filter ? (
+              <Button
+                label="Crear primera tarea"
+                icon="add"
+                style={styles.emptyButton}
                 onPress={() => openModal()}
-              >
-                <Ionicons name="add" size={20} color={Colors.white} />
-                <Text style={styles.addFirstButtonText}>Crear Primera Tarea</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+              />
+            ) : null}
+          </Card>
         ) : (
-          filteredChores.map((chore) => (
-            <View key={chore.id} style={styles.choreCard}>
-              <View style={styles.choreHeader}>
-                <View style={styles.choreInfo}>
-                  <Text style={styles.choreTitle}>{chore.title}</Text>
-                  <View style={styles.choreMeta}>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: statusColors[chore.status] },
-                      ]}
-                    >
-                      <Text style={styles.statusBadgeText}>
-                        {statusLabels[chore.status]}
-                      </Text>
-                    </View>
-                    <View style={styles.frequencyBadge}>
-                      <Text style={styles.frequencyBadgeText}>
-                        {frequencyLabels[chore.frequency]}
-                      </Text>
+          filteredChores.map((chore) => {
+            const assignees = chore.assigned_to
+              .map((id) => children.find((c) => c.id === id))
+              .filter((c): c is Child => Boolean(c));
+            const completer = children.find((c) => c.id === chore.completed_by);
+            const showCompleter = chore.status === 'completada' && Boolean(completer);
+            const showAssignees = !(showCompleter && assignees.length === 1 && assignees[0].id === completer?.id);
+            return (
+              <Card key={chore.id} style={styles.choreCard}>
+                <View style={styles.choreHeader}>
+                  <View style={styles.choreInfo}>
+                    <Text style={Type.heading} numberOfLines={2}>
+                      {chore.title}
+                    </Text>
+                    <View style={styles.choreMeta}>
+                      <Chip label={statusLabels[chore.status]} tone={statusTones[chore.status] ?? 'neutral'} />
+                      <Chip label={frequencyLabels[chore.frequency]} icon="repeat" tone="neutral" />
                     </View>
                   </View>
-                </View>
-                <Text style={styles.choreAmount}>
-                  {family.currency} {chore.amount.toFixed(2)}
-                </Text>
-              </View>
-
-              {chore.description && (
-                <Text style={styles.choreDescription}>{chore.description}</Text>
-              )}
-
-              <View style={styles.assignedTo}>
-                <Ionicons name="people-outline" size={14} color={Colors.textSecondary} />
-                <Text style={styles.assignedToText}>
-                  {getChildNames(chore.assigned_to)}
-                </Text>
-              </View>
-
-              {chore.status === 'completada' && chore.completed_by && (
-                <View style={styles.completedInfo}>
-                  <Text style={styles.completedByText}>
-                    Completada por: {children.find((c) => c.id === chore.completed_by)?.name}
+                  <Text style={styles.choreAmount}>
+                    {family.currency} {chore.amount.toFixed(2)}
                   </Text>
-                  {chore.comment && (
-                    <Text style={styles.commentText}>
-                      «{chore.comment}»
-                    </Text>
-                  )}
                 </View>
-              )}
 
-              <View style={styles.choreActions}>
-                {chore.status === 'completada' && (
-                  <>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, styles.approveBtn]}
-                      onPress={() => setConfirmApproveChore(chore)}
-                    >
-                      <Ionicons name="checkmark" size={16} color={Colors.white} />
-                      <Text style={styles.actionBtnText}>Aprobar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, styles.rejectBtn]}
-                      onPress={() => handleReject(chore.id)}
-                    >
-                      <Ionicons name="close" size={16} color={Colors.white} />
-                      <Text style={styles.actionBtnText}>Rechazar</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-                {(chore.status === 'rechazada' || chore.status === 'aprobada') && (
-                  <TouchableOpacity
-                    style={[styles.actionBtn, styles.resetBtn]}
-                    onPress={() => handleReset(chore.id)}
-                  >
-                    <Ionicons name="refresh" size={16} color={Colors.white} />
-                    <Text style={styles.actionBtnText}>Restablecer</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.editBtn]}
-                  onPress={() => openModal(chore)}
-                >
-                  <Ionicons name="pencil" size={16} color={Colors.white} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.deleteBtn]}
-                  onPress={() => handleDelete(chore)}
-                >
-                  <Ionicons name="trash" size={16} color={Colors.white} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
+                {chore.description ? (
+                  <Text style={Type.caption} numberOfLines={3}>
+                    {chore.description}
+                  </Text>
+                ) : null}
+
+                {showAssignees ? (
+                  <View style={styles.assignedTo}>
+                    <View style={styles.avatarStack}>
+                      {assignees.slice(0, 3).map((c, i) => (
+                        <Image
+                          key={c.id}
+                          source={getChildAvatarSource(c.gender)}
+                          style={[styles.assigneeAvatar, i > 0 && styles.assigneeAvatarOverlap]}
+                        />
+                      ))}
+                    </View>
+                    <Text style={[Type.caption, styles.flex1]} numberOfLines={1}>
+                      {getChildNames(chore.assigned_to)}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {showCompleter && completer ? (
+                  <Notice tone="primary" icon="checkmark-circle">
+                    Completada por {completer.name}
+                    {chore.comment ? ` · «${chore.comment}»` : ''}
+                  </Notice>
+                ) : null}
+
+                <View style={styles.choreActions}>
+                  {chore.status === 'completada' ? (
+                    <>
+                      <Button
+                        label="Rechazar"
+                        variant="secondary"
+                        size="sm"
+                        fullWidth={false}
+                        style={styles.flex1}
+                        onPress={() => handleReject(chore.id)}
+                      />
+                      <Button
+                        label="Aprobar"
+                        icon="checkmark"
+                        size="sm"
+                        fullWidth={false}
+                        style={styles.flex1}
+                        onPress={() => setConfirmApproveChore(chore)}
+                      />
+                    </>
+                  ) : chore.status === 'rechazada' || chore.status === 'aprobada' ? (
+                    <Button
+                      label="Restablecer"
+                      icon="refresh"
+                      variant="secondary"
+                      size="sm"
+                      fullWidth={false}
+                      style={styles.flex1}
+                      onPress={() => handleReset(chore.id)}
+                    />
+                  ) : (
+                    <View style={styles.flex1} />
+                  )}
+                  <SquareIconButton icon="create-outline" label={`Editar ${chore.title}`} onPress={() => openModal(chore)} />
+                  <SquareIconButton
+                    icon="trash-outline"
+                    label={`Eliminar ${chore.title}`}
+                    tone="danger"
+                    onPress={() => handleDelete(chore)}
+                  />
+                </View>
+              </Card>
+            );
+          })
         )}
       </ScrollView>
 
-      {/* Add/Edit Modal */}
-      <Modal
+      <AppModal
         visible={showModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowModal(false)}
+        onClose={() => setShowModal(false)}
+        title={editingChore ? 'Editar Tarea' : 'Crear Tarea'}
+        icon={editingChore ? 'create' : 'add-circle'}
+        iconTone="primary"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowModal(false)}
+            confirmLabel={editingChore ? 'Guardar' : 'Crear tarea'}
+            onConfirm={handleSave}
+            confirming={saving}
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <ScrollView>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
-                {editingChore ? 'Editar Tarea' : 'Crear Tarea'}
+        <Text style={modalFieldStyles.label}>Título *</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Ej: Limpiar cuarto"
+          placeholderTextColor={Colors.textLight}
+          value={formData.title}
+          onChangeText={(text) => setFormData({ ...formData, title: text })}
+        />
+
+        <Text style={modalFieldStyles.label}>Descripción de la tarea</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="Descripción detallada..."
+          placeholderTextColor={Colors.textLight}
+          value={formData.description}
+          onChangeText={(text) => setFormData({ ...formData, description: text })}
+          multiline
+          numberOfLines={3}
+        />
+
+        <Text style={modalFieldStyles.label}>Monto a pagar ({family.currency}) *</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="0.00"
+          placeholderTextColor={Colors.textLight}
+          value={formData.amount}
+          onChangeText={(text) => setFormData({ ...formData, amount: text })}
+          keyboardType="decimal-pad"
+        />
+
+        <Text style={modalFieldStyles.label}>Frecuencia</Text>
+        <Text style={modalFieldStyles.hint}>
+          Única: un solo ciclo. Diaria: pensada para repetir cada día. Semanal: cada semana. Usa la
+          fecha y «días consecutivos» para planificar varios días seguidos en el calendario.
+        </Text>
+        <View style={styles.frequencyOptions}>
+          {(['unica', 'diaria', 'semanal'] as const).map((freq) => (
+            <TouchableOpacity
+              key={freq}
+              style={[
+                styles.frequencyOption,
+                formData.frequency === freq && styles.frequencyOptionActive,
+              ]}
+              onPress={() => setFormData({ ...formData, frequency: freq })}
+            >
+              <Text
+                style={[
+                  styles.frequencyOptionText,
+                  formData.frequency === freq && styles.frequencyOptionTextActive,
+                ]}
+              >
+                {frequencyLabels[freq]}
               </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Título *</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej: Limpiar cuarto"
-                  placeholderTextColor={Colors.textLight}
-                  value={formData.title}
-                  onChangeText={(text) => setFormData({ ...formData, title: text })}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Descripción de la tarea</Text>
-                <TextInput
-                  style={[styles.textInput, styles.textArea]}
-                  placeholder="Descripción detallada..."
-                  placeholderTextColor={Colors.textLight}
-                  value={formData.description}
-                  onChangeText={(text) => setFormData({ ...formData, description: text })}
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Monto a pagar ({family.currency}) *</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="0.00"
-                  placeholderTextColor={Colors.textLight}
-                  value={formData.amount}
-                  onChangeText={(text) => setFormData({ ...formData, amount: text })}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Frecuencia</Text>
-                <Text style={styles.frequencyHint}>
-                  Única: un solo ciclo. Diaria: pensada para repetir cada día. Semanal: cada semana. Usa la
-                  fecha y «días consecutivos» para planificar varios días seguidos en el calendario.
+        <Text style={modalFieldStyles.label}>Fecha en calendario (opcional)</Text>
+        <Text style={modalFieldStyles.hint}>
+          Se muestra en Tareas → Calendario (formato AAAA-MM-DD)
+        </Text>
+        {Platform.OS === 'web' ? (
+          <TextInput
+            style={modalFieldStyles.input}
+            placeholder="2026-03-15"
+            placeholderTextColor={Colors.textLight}
+            value={formData.scheduled_date}
+            onChangeText={(text) => setFormData({ ...formData, scheduled_date: text })}
+          />
+        ) : (
+          <>
+            <View style={styles.dateRow}>
+              <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
+                <Ionicons name="calendar-outline" size={22} color={Colors.primary} />
+                <Text style={styles.datePickerBtnText} numberOfLines={1}>
+                  {formData.scheduled_date.trim()
+                    ? formData.scheduled_date
+                    : 'Elegir fecha en calendario'}
                 </Text>
-                <View style={styles.frequencyOptions}>
-                  {(['unica', 'diaria', 'semanal'] as const).map((freq) => (
-                    <TouchableOpacity
-                      key={freq}
-                      style={[
-                        styles.frequencyOption,
-                        formData.frequency === freq && styles.frequencyOptionActive,
-                      ]}
-                      onPress={() => setFormData({ ...formData, frequency: freq })}
-                    >
-                      <Text
-                        style={[
-                          styles.frequencyOptionText,
-                          formData.frequency === freq && styles.frequencyOptionTextActive,
-                        ]}
-                      >
-                        {frequencyLabels[freq]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Fecha en calendario (opcional)</Text>
-                <Text style={styles.fieldHint}>Se muestra en Tareas → Calendario (formato AAAA-MM-DD)</Text>
-                {Platform.OS === 'web' ? (
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="2026-03-15"
-                    placeholderTextColor={Colors.textLight}
-                    value={formData.scheduled_date}
-                    onChangeText={(text) => setFormData({ ...formData, scheduled_date: text })}
+              </TouchableOpacity>
+              {formData.scheduled_date.trim() ? (
+                <TouchableOpacity
+                  onPress={() => setFormData({ ...formData, scheduled_date: '' })}
+                  hitSlop={8}
+                >
+                  <Text style={styles.clearDate}>Quitar</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {androidDatePicker ? (
+              <DateTimePicker
+                value={parseISODateLocal(formData.scheduled_date) || new Date()}
+                mode="date"
+                display="default"
+                onChange={(e, d) => {
+                  setAndroidDatePicker(false);
+                  if (e.type === 'dismissed' || !d) return;
+                  setFormData((prev) => ({ ...prev, scheduled_date: toISODateLocal(d) }));
+                }}
+              />
+            ) : null}
+            {Platform.OS === 'ios' ? (
+              <AppModal
+                visible={showDateModal}
+                onClose={() => setShowDateModal(false)}
+                title="Elegir fecha"
+                icon="calendar"
+                iconTone="primary"
+                variant="card"
+                scrollable={false}
+                footer={
+                  <AppModalActions
+                    onCancel={() => setShowDateModal(false)}
+                    confirmLabel="Listo"
+                    onConfirm={() => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        scheduled_date: toISODateLocal(datePickerTemp),
+                      }));
+                      setShowDateModal(false);
+                    }}
                   />
-                ) : (
-                  <>
-                    <View style={styles.dateRow}>
-                      <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
-                        <Ionicons name="calendar-outline" size={22} color={Colors.primary} />
-                        <Text style={styles.datePickerBtnText} numberOfLines={1}>
-                          {formData.scheduled_date.trim()
-                            ? formData.scheduled_date
-                            : 'Elegir fecha en calendario'}
-                        </Text>
-                      </TouchableOpacity>
-                      {formData.scheduled_date.trim() ? (
-                        <TouchableOpacity
-                          onPress={() => setFormData({ ...formData, scheduled_date: '' })}
-                          hitSlop={8}
-                        >
-                          <Text style={styles.clearDate}>Quitar</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                    {androidDatePicker ? (
-                      <DateTimePicker
-                        value={parseISODateLocal(formData.scheduled_date) || new Date()}
-                        mode="date"
-                        display="default"
-                        onChange={(e, d) => {
-                          setAndroidDatePicker(false);
-                          if (e.type === 'dismissed' || !d) return;
-                          setFormData((prev) => ({ ...prev, scheduled_date: toISODateLocal(d) }));
-                        }}
-                      />
-                    ) : null}
-                    {Platform.OS === 'ios' ? (
-                      <Modal visible={showDateModal} transparent animationType="slide">
-                        <View style={styles.dateModalOverlay}>
-                          <View style={styles.dateModalSheet}>
-                            <View style={styles.dateModalToolbar}>
-                              <TouchableOpacity onPress={() => setShowDateModal(false)}>
-                                <Text style={styles.dateModalToolbarBtn}>Cancelar</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    scheduled_date: toISODateLocal(datePickerTemp),
-                                  }));
-                                  setShowDateModal(false);
-                                }}
-                              >
-                                <Text style={[styles.dateModalToolbarBtn, styles.dateModalToolbarDone]}>
-                                  Listo
-                                </Text>
-                              </TouchableOpacity>
-                            </View>
-                            <DateTimePicker
-                              value={datePickerTemp}
-                              mode="date"
-                              display="spinner"
-                              onChange={(_, d) => d && setDatePickerTemp(d)}
-                              themeVariant="light"
-                            />
-                          </View>
-                        </View>
-                      </Modal>
-                    ) : null}
-                  </>
+                }
+              >
+                <DateTimePicker
+                  value={datePickerTemp}
+                  mode="date"
+                  display="spinner"
+                  onChange={(_, d) => d && setDatePickerTemp(d)}
+                  themeVariant="light"
+                />
+              </AppModal>
+            ) : null}
+          </>
+        )}
+
+        {!editingChore ? (
+          <>
+            <Text style={modalFieldStyles.label}>Días consecutivos</Text>
+            <Text style={modalFieldStyles.hint}>
+              Número de días seguidos con la misma tarea (1 = un solo día). Si es mayor a 1, debes
+              elegir la fecha de inicio arriba. Máximo 31.
+            </Text>
+            <TextInput
+              style={modalFieldStyles.input}
+              placeholder="1"
+              placeholderTextColor={Colors.textLight}
+              keyboardType="number-pad"
+              value={formData.consecutive_days}
+              onChangeText={(text) =>
+                setFormData({
+                  ...formData,
+                  consecutive_days: text.replace(/[^0-9]/g, '') || '1',
+                })
+              }
+            />
+          </>
+        ) : null}
+
+        <Text style={modalFieldStyles.label}>Asignar a *</Text>
+        <View style={styles.childrenGrid}>
+          {children.map((child) => (
+            <TouchableOpacity
+              key={child.id}
+              style={[
+                styles.childOption,
+                selectedChildren.includes(child.id) && styles.childOptionActive,
+              ]}
+              onPress={() => toggleChildSelection(child.id)}
+            >
+              <View
+                style={[
+                  styles.childOptionCheck,
+                  selectedChildren.includes(child.id) && styles.childOptionCheckActive,
+                ]}
+              >
+                {selectedChildren.includes(child.id) && (
+                  <Ionicons name="checkmark" size={14} color={Colors.white} />
                 )}
               </View>
-
-              {!editingChore ? (
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Días consecutivos</Text>
-                  <Text style={styles.fieldHint}>
-                    Número de días seguidos con la misma tarea (1 = un solo día). Si es mayor a 1, debes
-                    elegir la fecha de inicio arriba. Máximo 31.
-                  </Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="1"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="number-pad"
-                    value={formData.consecutive_days}
-                    onChangeText={(text) =>
-                      setFormData({
-                        ...formData,
-                        consecutive_days: text.replace(/[^0-9]/g, '') || '1',
-                      })
-                    }
-                  />
-                </View>
-              ) : null}
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Asignar a *</Text>
-                <View style={styles.childrenGrid}>
-                  {children.map((child) => (
-                    <TouchableOpacity
-                      key={child.id}
-                      style={[
-                        styles.childOption,
-                        selectedChildren.includes(child.id) && styles.childOptionActive,
-                      ]}
-                      onPress={() => toggleChildSelection(child.id)}
-                    >
-                      <View
-                        style={[
-                          styles.childOptionCheck,
-                          selectedChildren.includes(child.id) &&
-                            styles.childOptionCheckActive,
-                        ]}
-                      >
-                        {selectedChildren.includes(child.id) && (
-                          <Ionicons name="checkmark" size={14} color={Colors.white} />
-                        )}
-                      </View>
-                      <Text style={styles.childOptionText}>{child.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => setShowModal(false)}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.saveButton, saving && styles.buttonDisabled]}
-                  onPress={handleSave}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator color={Colors.white} />
-                  ) : (
-                    <Text style={styles.saveButtonText}>
-                      {editingChore ? 'Guardar' : 'Crear tarea'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
-
-      {/* Predefined Chores Modal */}
-      <Modal
-        visible={showPredefinedModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowPredefinedModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.predefinedModalContent}>
-            <View style={styles.predefinedModalHeader}>
-              <Text style={styles.modalTitle}>Nueva Tarea</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowPredefinedModal(false)}
-              >
-                <Ionicons name="close" size={24} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.predefinedSubtitle}>
-              Selecciona una tarea predefinida o crea una personalizada
-            </Text>
-
-            {/* Custom Task Button */}
-            <TouchableOpacity
-              style={styles.customTaskButton}
-              onPress={() => {
-                setShowPredefinedModal(false);
-                setShowModal(true);
-              }}
-            >
-              <View style={styles.customTaskIcon}>
-                <Ionicons name="create-outline" size={24} color={Colors.white} />
-              </View>
-              <View style={styles.customTaskInfo}>
-                <Text style={styles.customTaskTitle}>Tarea Personalizada</Text>
-                <Text style={styles.customTaskDesc}>Crea una tarea con tu descripción</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+              <Text style={styles.childOptionText}>{child.name}</Text>
             </TouchableOpacity>
-
-            <Text style={styles.predefinedSectionTitle}>Tareas Predefinidas</Text>
-
-            <ScrollView style={styles.predefinedList} showsVerticalScrollIndicator={false}>
-              {predefinedChores.map((chore, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.predefinedItem}
-                  onPress={() => selectPredefinedChore(chore)}
-                >
-                  <View style={[styles.predefinedIcon, { backgroundColor: index % 3 === 0 ? Colors.primary + '20' : index % 3 === 1 ? Colors.secondary + '20' : Colors.accent + '20' }]}>
-                    <Ionicons 
-                      name={chore.icon as any} 
-                      size={22} 
-                      color={index % 3 === 0 ? Colors.primary : index % 3 === 1 ? Colors.secondary : Colors.accent} 
-                    />
-                  </View>
-                  <View style={styles.predefinedInfo}>
-                    <Text style={styles.predefinedTitle}>{chore.title}</Text>
-                    <Text style={styles.predefinedDesc} numberOfLines={1}>{chore.description}</Text>
-                  </View>
-                  <Text style={styles.predefinedAmount}>
-                    {family?.currency} {chore.amount}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+          ))}
         </View>
-      </Modal>
+      </AppModal>
 
-      <Modal
-        visible={!!confirmApproveChore}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setConfirmApproveChore(null)}
+      <AppModal
+        visible={showPredefinedModal}
+        onClose={() => setShowPredefinedModal(false)}
+        title="Nueva Tarea"
+        subtitle="Selecciona una tarea predefinida o crea una personalizada"
+        icon="list"
+        iconTone="primary"
+        size="lg"
       >
-        <View style={styles.approveModalOverlay}>
-          <View style={[styles.approveConfirmBox, { maxHeight: '92%' }]}>
-            {confirmApproveChore ? (
-              <>
-                <ScrollView
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                  style={{ maxHeight: 440 }}
-                >
-                  <Text style={styles.modalTitle}>Confirmar aprobación</Text>
-                  <Text style={styles.approveChoreTitle}>{confirmApproveChore.title}</Text>
-                  <Text style={styles.approveSub}>
-                    Monto de la tarea: {family?.currency} {confirmApproveChore.amount.toFixed(2)}
-                  </Text>
-                  {confirmApproveChore.completed_by ? (
-                    <>
-                      <ApproveSavingsControls
-                        currency={family?.currency ?? ''}
-                        childDefaultPercent={confirmChildDefaultPct}
-                        goals={approveSavingsGoals}
-                        mode={approveSavingsMode}
-                        onModeChange={(m) => {
-                          setApproveSavingsMode(m);
-                          if (m === 'percent' && confirmApproveChild?.savings_on_approve_percent != null) {
-                            const p = Number(confirmApproveChild.savings_on_approve_percent);
-                            if (!Number.isNaN(p)) setApproveSavingsPercentStr(String(p));
-                          }
-                        }}
-                        percentStr={approveSavingsPercentStr}
-                        onPercentStrChange={setApproveSavingsPercentStr}
-                        amountStr={approveSavingsAmountStr}
-                        onAmountStrChange={setApproveSavingsAmountStr}
-                        goalId={approveSavingsGoalId}
-                        onGoalIdChange={setApproveSavingsGoalId}
-                      />
-                      <SavingsSplitPreviewBox
-                        currency={family?.currency ?? ''}
-                        loading={approveSplitLoading}
-                        preview={approveSplitPreview}
-                      />
-                    </>
-                  ) : null}
-                </ScrollView>
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={() => setConfirmApproveChore(null)}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.saveButton, approvingChore && styles.buttonDisabled]}
-                    onPress={submitConfirmedApprove}
-                    disabled={approvingChore}
-                  >
-                    {approvingChore ? (
-                      <ActivityIndicator color={Colors.white} />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Aprobar y pagar</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : null}
+        <TouchableOpacity
+          style={styles.customTaskButton}
+          onPress={() => {
+            setShowPredefinedModal(false);
+            setShowModal(true);
+          }}
+        >
+          <View style={styles.customTaskIcon}>
+            <Ionicons name="create-outline" size={24} color={Colors.white} />
           </View>
-        </View>
-      </Modal>
-    </View>
+          <View style={styles.customTaskInfo}>
+            <Text style={styles.customTaskTitle}>Tarea Personalizada</Text>
+            <Text style={styles.customTaskDesc}>Crea una tarea con tu descripción</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+        </TouchableOpacity>
+
+        <Text style={styles.predefinedSectionTitle}>Tareas Predefinidas</Text>
+
+        {predefinedChores.map((chore, index) => (
+          <TouchableOpacity
+            key={index}
+            style={styles.predefinedItem}
+            onPress={() => selectPredefinedChore(chore)}
+          >
+            <View
+              style={[
+                styles.predefinedIcon,
+                {
+                  backgroundColor:
+                    index % 3 === 0
+                      ? Colors.primary + '20'
+                      : index % 3 === 1
+                        ? Colors.secondary + '20'
+                        : Colors.accent + '20',
+                },
+              ]}
+            >
+              <Ionicons
+                name={chore.icon as any}
+                size={22}
+                color={
+                  index % 3 === 0
+                    ? Colors.primary
+                    : index % 3 === 1
+                      ? Colors.secondary
+                      : Colors.accent
+                }
+              />
+            </View>
+            <View style={styles.predefinedInfo}>
+              <Text style={styles.predefinedTitle}>{chore.title}</Text>
+              <Text style={styles.predefinedDesc} numberOfLines={1}>
+                {chore.description}
+              </Text>
+            </View>
+            <Text style={styles.predefinedAmount}>
+              {family?.currency} {chore.amount}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </AppModal>
+
+      <AppModal
+        visible={!!confirmApproveChore}
+        onClose={() => setConfirmApproveChore(null)}
+        title="Confirmar aprobación"
+        subtitle={
+          confirmApproveChore
+            ? `${confirmApproveChore.title} · ${family?.currency} ${confirmApproveChore.amount.toFixed(2)}`
+            : undefined
+        }
+        icon="checkmark-circle"
+        iconTone="success"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setConfirmApproveChore(null)}
+            confirmLabel="Aprobar y pagar"
+            onConfirm={submitConfirmedApprove}
+            confirming={approvingChore}
+            confirmTone="success"
+          />
+        }
+      >
+        {confirmApproveChore?.completed_by ? (
+          <>
+            <ApproveSavingsControls
+              currency={family?.currency ?? ''}
+              childDefaultPercent={confirmChildDefaultPct}
+              goals={approveSavingsGoals}
+              mode={approveSavingsMode}
+              onModeChange={(m) => {
+                setApproveSavingsMode(m);
+                if (m === 'percent' && confirmApproveChild?.savings_on_approve_percent != null) {
+                  const p = Number(confirmApproveChild.savings_on_approve_percent);
+                  if (!Number.isNaN(p)) setApproveSavingsPercentStr(String(p));
+                }
+              }}
+              percentStr={approveSavingsPercentStr}
+              onPercentStrChange={setApproveSavingsPercentStr}
+              amountStr={approveSavingsAmountStr}
+              onAmountStrChange={setApproveSavingsAmountStr}
+              goalId={approveSavingsGoalId}
+              onGoalIdChange={setApproveSavingsGoalId}
+              reasonNote={approveSavingsReasonNote}
+              onReasonNoteChange={setApproveSavingsReasonNote}
+            />
+            <SavingsSplitPreviewBox
+              currency={family?.currency ?? ''}
+              loading={approveSplitLoading}
+              preview={approveSplitPreview}
+            />
+          </>
+        ) : null}
+      </AppModal>
+    </ParentScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  content: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
-  loadingContainer: {
+  contentInner: {
+    padding: Spacing.xl,
+    paddingBottom: Spacing.xxxl,
+    gap: Spacing.md,
+  },
+  flex1: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
+    minWidth: 0,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: Colors.surface,
+  center: {
+    textAlign: 'center',
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
+  emptyCard: {
     alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xxl,
+  },
+  emptyButton: {
+    marginTop: Spacing.sm,
   },
   filterContainer: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  filterScroll: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
   filterTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    backgroundColor: Colors.background,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 36,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderDark,
   },
   filterTabActive: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.text,
+    borderColor: Colors.text,
+  },
+  filterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   filterTabText: {
     fontSize: 13,
+    fontWeight: '700',
     color: Colors.textSecondary,
   },
   filterTabTextActive: {
     color: Colors.white,
-    fontWeight: '600',
   },
-  content: {
-    flex: 1,
-    padding: 16,
+  filterCount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.textLight,
   },
-  noFamilyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  noFamilyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-  },
-  goHomeButton: {
-    marginTop: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-  },
-  goHomeButtonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 8,
-  },
-  goChildrenButton: {
-    marginTop: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-  },
-  goChildrenButtonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  addFirstButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 20,
-    gap: 8,
-  },
-  addFirstButtonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '600',
+  filterCountActive: {
+    color: 'rgba(255,255,255,0.7)',
   },
   choreCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    gap: Spacing.md,
   },
   choreHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: Spacing.md,
   },
   choreInfo: {
     flex: 1,
-  },
-  choreTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: Colors.text,
+    minWidth: 0,
+    gap: Spacing.sm,
   },
   choreMeta: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  frequencyBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-  },
-  frequencyBadgeText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: Colors.textSecondary,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   choreAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.secondary,
-  },
-  choreDescription: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 12,
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.secondaryInk,
   },
   assignedTo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    gap: 6,
+    gap: Spacing.sm,
   },
-  assignedToText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
+  avatarStack: {
+    flexDirection: 'row',
   },
-  completedInfo: {
-    backgroundColor: Colors.background,
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 12,
+  assigneeAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.surface,
   },
-  completedByText: {
-    fontSize: 13,
-    color: Colors.text,
-    fontWeight: '500',
-  },
-  commentText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontStyle: 'italic',
-    marginTop: 4,
+  assigneeAvatarOverlap: {
+    marginLeft: -8,
   },
   choreActions: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-    flexWrap: 'wrap',
-  },
-  actionBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 4,
-  },
-  actionBtnText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.white,
-  },
-  approveBtn: {
-    backgroundColor: Colors.success,
-  },
-  rejectBtn: {
-    backgroundColor: Colors.error,
-  },
-  resetBtn: {
-    backgroundColor: Colors.primary,
-  },
-  editBtn: {
-    backgroundColor: Colors.warning,
-  },
-  deleteBtn: {
-    backgroundColor: Colors.error,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  approveModalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  approveConfirmBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 420,
-  },
-  approveChoreTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  approveSub: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    marginTop: 40,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
   frequencyOptions: {
     flexDirection: 'row',
     gap: 8,
+    marginBottom: 12,
   },
   frequencyOption: {
     flex: 1,
@@ -1423,21 +1216,11 @@ const styles = StyleSheet.create({
   frequencyOptionTextActive: {
     color: Colors.white,
   },
-  frequencyHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    lineHeight: 17,
-    marginBottom: 10,
-  },
-  fieldHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 8,
-  },
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginBottom: 12,
   },
   datePickerBtn: {
     flex: 1,
@@ -1461,33 +1244,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: Colors.error,
-  },
-  dateModalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: Colors.overlay,
-  },
-  dateModalSheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingBottom: 24,
-  },
-  dateModalToolbar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
-  dateModalToolbarBtn: {
-    fontSize: 17,
-    color: Colors.primary,
-  },
-  dateModalToolbarDone: {
-    fontWeight: '700',
   },
   childrenGrid: {
     gap: 8,
@@ -1522,59 +1278,6 @@ const styles = StyleSheet.create({
   childOptionText: {
     fontSize: 15,
     color: Colors.text,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  saveButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  // Predefined Modal Styles
-  predefinedModalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: '85%',
-  },
-  predefinedModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  closeButton: {
-    padding: 8,
-  },
-  predefinedSubtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 20,
   },
   customTaskButton: {
     flexDirection: 'row',
@@ -1616,9 +1319,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  predefinedList: {
-    maxHeight: 400,
-  },
   predefinedItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1652,7 +1352,7 @@ const styles = StyleSheet.create({
   },
   predefinedAmount: {
     fontSize: 15,
-    fontWeight: '600',
-    color: Colors.secondary,
+    fontWeight: '700',
+    color: Colors.secondaryInk,
   },
 });

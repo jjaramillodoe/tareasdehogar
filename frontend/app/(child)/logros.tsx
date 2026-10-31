@@ -1,18 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  RefreshControl,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { achievementsAPI, statsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
+import ChildScreenShell, { ChildEmptyState } from '../../src/components/ChildScreenShell';
+import { shadow } from '../../src/utils/shadow';
 
 type Definition = { title: string; description: string; icon: string };
 
@@ -80,17 +74,9 @@ export default function ChildLogrosScreen() {
 
   if (!selectedChild) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.emptyText}>Inicia sesión de nuevo</Text>
-      </View>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
+      <ChildScreenShell title="Logros" showBack>
+        <ChildEmptyState icon="alert-circle-outline" title="Inicia sesión de nuevo" />
+      </ChildScreenShell>
     );
   }
 
@@ -99,53 +85,55 @@ export default function ChildLogrosScreen() {
   const unlocked = entries.filter(([k]) => earnedTypes.has(k)).length;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Mis logros</Text>
-        <Text style={styles.headerSubtitle}>
-          Insignias por tareas aprobadas, rachas, metas y recompensas acumuladas
-        </Text>
+    <ChildScreenShell
+      title="Logros"
+      subtitle="Insignias por tareas, rachas y metas"
+      loading={isLoading}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        load();
+      }}
+      showBack
+      accent="yellow"
+    >
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <View style={[styles.summaryIcon, { backgroundColor: Colors.primary + '14' }]}>
+            <Ionicons name="checkmark-done" size={20} color={Colors.primary} />
+          </View>
+          <Text style={styles.summaryText}>
+            Tareas aprobadas:{' '}
+            <Text style={styles.summaryBold}>{stats?.approved_tasks ?? 0}</Text>
+          </Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <View style={[styles.summaryIcon, { backgroundColor: Colors.secondary + '44' }]}>
+            <Ionicons name="ribbon" size={20} color={Colors.secondaryInk} />
+          </View>
+          <Text style={styles.summaryText}>
+            Desbloqueados:{' '}
+            <Text style={styles.summaryBold}>
+              {unlocked} / {entries.length || '—'}
+            </Text>
+          </Text>
+        </View>
       </View>
-      <FlagStripe height={3} />
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollPad}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load();
-            }}
-          />
-        }
-      >
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryRow}>
-            <Ionicons name="checkmark-done-outline" size={22} color={Colors.primary} />
-            <Text style={styles.summaryText}>
-              Tareas aprobadas:{' '}
-              <Text style={styles.summaryBold}>{stats?.approved_tasks ?? 0}</Text>
-            </Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Ionicons name="ribbon-outline" size={22} color={Colors.secondary} />
-            <Text style={styles.summaryText}>
-              Logros desbloqueados:{' '}
-              <Text style={styles.summaryBold}>
-                {unlocked} / {entries.length || '—'}
-              </Text>
-            </Text>
-          </View>
+      <View style={styles.sectionHeadRow}>
+        <Text style={styles.sectionLabel}>Insignias</Text>
+        <View style={styles.sectionCountBadge}>
+          <Text style={styles.sectionCountText}>{entries.length}</Text>
         </View>
+      </View>
 
-        <View style={styles.sectionHeadRow}>
-          <Text style={styles.sectionLabel}>Insignias</Text>
-          <View style={styles.sectionCountBadge}>
-            <Text style={styles.sectionCountText}>{entries.length}</Text>
-          </View>
-        </View>
+      {entries.length === 0 ? (
+        <ChildEmptyState
+          icon="ribbon-outline"
+          title="Sin logros aún"
+          subtitle="No hay definiciones de logros disponibles."
+        />
+      ) : (
         <View style={styles.grid}>
           {entries.map(([key, def]) => {
             const got = earnedTypes.has(key);
@@ -158,10 +146,7 @@ export default function ChildLogrosScreen() {
                 })
               : null;
             return (
-              <View
-                key={key}
-                style={[styles.badgeCard, !got && styles.badgeCardLocked]}
-              >
+              <View key={key} style={[styles.badgeCard, !got && styles.badgeCardLocked]}>
                 <View style={[styles.badgeIconWrap, !got && styles.badgeIconWrapMuted]}>
                   <Ionicons
                     name={got ? iconName(def.icon) : 'lock-closed'}
@@ -184,94 +169,58 @@ export default function ChildLogrosScreen() {
             );
           })}
         </View>
+      )}
 
-        {entries.length === 0 ? (
-          <Text style={styles.hint}>No hay definiciones de logros disponibles.</Text>
-        ) : null}
-
-        <Text style={styles.footerHint}>
-          Sigue completando tareas y metas con tu familia para desbloquear más insignias. Las rachas
-          cuentan cuando aprueban tus tareas varios días seguidos.
-        </Text>
-      </ScrollView>
-    </View>
+      <Text style={styles.footerHint}>
+        Sigue completando tareas y metas con tu familia para desbloquear más insignias.
+      </Text>
+    </ChildScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 12,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    marginTop: 6,
-    lineHeight: 18,
-  },
-  content: {
-    flex: 1,
-  },
-  scrollPad: {
-    padding: 16,
-    paddingBottom: 32,
-  },
   summaryCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 20,
     borderWidth: 1,
     borderColor: Colors.border,
     gap: 12,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 3, blur: 10, opacity: 0.08, elevation: 3 }),
   },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
+  },
+  summaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summaryText: {
     fontSize: 15,
     color: Colors.text,
     flex: 1,
+    fontWeight: '500',
   },
   summaryBold: {
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.primary,
   },
   sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-    marginBottom: 0,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.text,
   },
   sectionHeadRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   sectionCountBadge: {
     minWidth: 28,
@@ -297,8 +246,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     maxWidth: '48%',
     backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.border,
     minHeight: 168,
@@ -310,7 +259,7 @@ const styles = StyleSheet.create({
   badgeIconWrap: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: 14,
     backgroundColor: Colors.primary + '18',
     justifyContent: 'center',
     alignItems: 'center',
@@ -321,7 +270,7 @@ const styles = StyleSheet.create({
   },
   badgeTitle: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.text,
     marginBottom: 4,
   },
@@ -337,7 +286,7 @@ const styles = StyleSheet.create({
   badgeDate: {
     fontSize: 11,
     color: Colors.success,
-    fontWeight: '600',
+    fontWeight: '700',
     marginTop: 8,
   },
   badgePending: {
@@ -345,11 +294,6 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     marginTop: 8,
     fontStyle: 'italic',
-  },
-  hint: {
-    textAlign: 'center',
-    color: Colors.textSecondary,
-    marginTop: 16,
   },
   footerHint: {
     fontSize: 12,

@@ -4,15 +4,16 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  Pressable,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
   Alert,
-  Modal,
   TextInput,
   Keyboard,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/store/authStore';
 import {
   familyAPI,
@@ -24,17 +25,35 @@ import {
   SavingsSplitPreviewDTO,
   SavingsGoalDTO,
 } from '../../src/services/api';
-import { Colors } from '../../src/constants/colors';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import FlagStripe from '../../src/components/FlagStripe';
+import FirstRunChecklist from '../../src/components/FirstRunChecklist';
 import { FamilyLocaleSection } from '../../src/components/FamilyLocaleSection';
 import { SavingsSplitPreviewBox } from '../../src/components/SavingsSplitPreviewBox';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
+import { resolveMediaUrl } from '../../src/utils/mediaUrl';
+import { getChildAvatarSource, getParentAvatarSource } from '../../src/utils/avatars';
+
 import {
   ApproveSavingsControls,
   buildSavingsApproveOpts,
   ApproveSavingsMode,
 } from '../../src/components/ApproveSavingsControls';
+import DailyStreakCard from '../../src/components/DailyStreakCard';
+import DailyMissionsCard from '../../src/components/DailyMissionsCard';
+import ConfettiBurst from '../../src/components/ConfettiBurst';
+import { hapticApprove } from '../../src/utils/feedback';
+import { weekDoneFromDates } from '../../src/utils/weekActivity';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import Chip from '../../src/components/ui/Chip';
+import IconButton from '../../src/components/ui/IconButton';
+import IconTile from '../../src/components/ui/IconTile';
+import ListRow from '../../src/components/ui/ListRow';
+import SectionHeader from '../../src/components/ui/SectionHeader';
+import StatTile from '../../src/components/ui/StatTile';
+import { Colors, Radius, Spacing, Type } from '../../src/theme';
 
 interface Child {
   id: string;
@@ -54,6 +73,8 @@ interface Chore {
   status: string;
   completed_by?: string;
   photo_url?: string | null;
+  description?: string;
+  assigned_to?: string[];
 }
 
 interface Withdrawal {
@@ -71,19 +92,19 @@ type FamilyChallengeChild = {
   hit_target: boolean;
 };
 
-function getChildAvatarSource(gender?: 'mujer' | 'hombre' | null) {
-  if (gender === 'mujer') {
-    return require('../../assets/images/mujer.png');
-  }
-  return require('../../assets/images/hombre.png');
-}
-
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, family, setFamily, refreshUser, logout } = useAuthStore();
+  const insets = useSafeAreaInsets();
+  const { user, family, setFamily, refreshUser } = useAuthStore();
+  const firstName = (user?.name || '').trim().split(/\s+/)[0] || 'familia';
   const [children, setChildren] = useState<Child[]>([]);
   const [pendingChores, setPendingChores] = useState<Chore[]>([]);
   const [completedChores, setCompletedChores] = useState<Chore[]>([]);
+  const [allChores, setAllChores] = useState<Chore[]>([]);
+  const [weekDone, setWeekDone] = useState<boolean[]>([false, false, false, false, false, false, false]);
+  const [familyStreak, setFamilyStreak] = useState(0);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [choresTotalCount, setChoresTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
@@ -112,6 +133,9 @@ export default function HomeScreen() {
   } | null>(null);
   const [pendingCashNeeded, setPendingCashNeeded] = useState(0);
   const [pendingWithdrawalsCount, setPendingWithdrawalsCount] = useState(0);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedChoreIds, setSelectedChoreIds] = useState<string[]>([]);
+  const [bulkApproving, setBulkApproving] = useState(false);
 
   const totalApprovePay = useMemo(() => {
     if (!approveTarget) return 0;
@@ -150,7 +174,11 @@ export default function HomeScreen() {
     savingsGoalsAPI
       .getAll(approveTarget.completed_by)
       .then((data) => {
-        if (!cancelled) setApproveSavingsGoals(data);
+        if (!cancelled) {
+          setApproveSavingsGoals(
+            data.filter((g) => !g.is_completed && (g.status || 'active') === 'active')
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setApproveSavingsGoals([]);
@@ -216,6 +244,8 @@ export default function HomeScreen() {
           setChildren(childrenData);
 
           const allChores = await choresAPI.getAll();
+          setAllChores(allChores);
+          setChoresTotalCount(allChores.length);
           setPendingChores(allChores.filter((c: Chore) => c.status === 'completada'));
           setCompletedChores(allChores.filter((c: Chore) => c.status === 'aprobada'));
           const withdrawals = (await withdrawalsAPI.list().catch(() => [])) as Withdrawal[];
@@ -226,6 +256,13 @@ export default function HomeScreen() {
           );
           const report = await statsAPI.getFamilyReport(30);
           setFamilyChallenge((report as any).family_savings_challenge ?? null);
+          const daily = (report as { daily_stats?: Record<string, { tasks_completed: number }> }).daily_stats || {};
+          const activeDates = Object.entries(daily)
+            .filter(([, s]) => Number(s.tasks_completed || 0) > 0)
+            .map(([d]) => d);
+          setWeekDone(weekDoneFromDates(activeDates));
+          const kids = (report as { children_stats?: { current_streak?: number }[] }).children_stats || [];
+          setFamilyStreak(Math.max(0, ...kids.map((k) => Number(k.current_streak || 0))));
         } catch (e) {
           console.log('No family yet');
         }
@@ -288,6 +325,8 @@ export default function HomeScreen() {
         savings_reason_note: approveSavingsReasonNote.trim() || undefined,
         ...savingsOpts,
       });
+      await hapticApprove();
+      setShowConfetti(true);
       Keyboard.dismiss();
       setApproveTarget(null);
       loadData();
@@ -301,6 +340,57 @@ export default function HomeScreen() {
     } finally {
       setApproving(false);
     }
+  };
+
+  const toggleChoreSelected = (choreId: string) => {
+    setSelectedChoreIds((prev) =>
+      prev.includes(choreId) ? prev.filter((id) => id !== choreId) : [...prev, choreId]
+    );
+  };
+
+  const runBulkApprove = (choreIds?: string[]) => {
+    const targets = choreIds?.length
+      ? pendingChores.filter((c) => choreIds.includes(c.id))
+      : pendingChores;
+    if (targets.length === 0) {
+      Alert.alert('Sin tareas', 'No hay tareas para aprobar.');
+      return;
+    }
+    const total = targets.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const currency = family?.currency || '';
+    Alert.alert(
+      choreIds?.length ? 'Aprobar seleccionadas' : 'Aprobar todas',
+      `Se aprobarán ${targets.length} tarea(s) por ${currency} ${total.toFixed(2)}.\n\nSe usa el % de ahorro por defecto de cada hijo (sin bono de calidad).`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aprobar',
+          onPress: async () => {
+            setBulkApproving(true);
+            try {
+              const res = await choresAPI.approveBulk({
+                chore_ids: targets.map((c) => c.id),
+                rating: 5,
+              });
+              setSelectMode(false);
+              setSelectedChoreIds([]);
+              await loadData();
+              Alert.alert(
+                'Listo',
+                `Aprobadas: ${res.approved_count}` +
+                  (res.skipped_count ? `\nOmitidas: ${res.skipped_count}` : '') +
+                  `\nTotal: ${currency} ${Number(res.total_amount).toFixed(2)}`
+              );
+            } catch (error: any) {
+              const message = error.response?.data?.detail || 'Error al aprobar en lote';
+              Alert.alert('Error', message);
+            } finally {
+              setBulkApproving(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleRejectChore = async (choreId: string) => {
@@ -342,438 +432,536 @@ export default function HomeScreen() {
     );
   }
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
+  const currency = family?.currency ?? '';
+  const pendingTotal = pendingChores.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+  const goalsCardHint =
+    pendingWithdrawalsCount > 0
+      ? `${pendingWithdrawalsCount} retiro(s) · ${currency} ${pendingCashNeeded.toFixed(2)}`
+      : 'Metas, bonos y retiros';
+  const journeyHint = familyChallenge
+    ? familyChallenge.all_children_hit_target
+      ? 'Reto familiar cumplido este mes'
+      : `Reto: ${familyChallenge.target_percent.toFixed(0)}% de ahorro`
+    : 'Reportes e insignias';
+
+  const openApprove = (chore: Chore) => {
+    setApproveTarget(chore);
+    setRating(5);
+    setFeedback('');
+    setQualityBonus('');
+  };
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>¡Hola, {user?.name}!</Text>
-          <Text style={styles.subtitle}>
-            {family ? `Familia ${family.name}` : 'Sin familia'}
-          </Text>
+      <View style={[styles.header, { paddingTop: insets.top }]}>
+        <FlagStripe height={5} style={styles.flag} />
+        <View style={styles.headerRow}>
+          <Image
+            source={getParentAvatarSource(user?.gender)}
+            style={styles.parentAvatar}
+            contentFit="cover"
+          />
+          <View style={styles.headerText}>
+            <Text style={Type.caption} numberOfLines={1}>
+              {family ? `Familia ${family.name}` : 'HabitApp'}
+            </Text>
+            <Text style={[Type.title, styles.greeting]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {greeting}, {firstName}
+            </Text>
+          </View>
+          <IconButton
+            icon="notifications-outline"
+            label="Notificaciones"
+            onPress={() => router.push('/(parent)/notifications')}
+          />
+          <IconButton
+            icon="person-outline"
+            label="Mi perfil"
+            onPress={() => router.push('/(parent)/profile')}
+          />
         </View>
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={() => {
-            Alert.alert('Cerrar Sesión', '¿Deseas cerrar sesión?', [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Cerrar Sesión', onPress: () => { logout(); router.replace('/'); } },
-            ]);
-          }}
-        >
-          <Ionicons name="log-out-outline" size={24} color={Colors.error} />
-        </TouchableOpacity>
       </View>
-
-      <FlagStripe height={4} />
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={[styles.contentInner, { paddingBottom: Spacing.xxxl }]}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData();
+            }}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
+          />
         }
       >
         {!family ? (
-          <View style={styles.noFamilyContainer}>
-            <Ionicons name="home-outline" size={64} color={Colors.textLight} />
-            <Text style={styles.noFamilyText}>Aún no tienes una familia creada</Text>
-            <Text style={styles.noFamilySubtext}>
-              Crea tu familia para empezar a agregar hijos y tareas
+          <Card style={styles.noFamilyCard}>
+            <IconTile icon="home" size={64} />
+            <Text style={[Type.heading, styles.center]}>Aún no tienes una familia</Text>
+            <Text style={[Type.body, styles.center]}>
+              Crea tu familia para empezar a agregar hijos y tareas.
             </Text>
-            <TouchableOpacity
-              style={styles.createFamilyButton}
+            <Button
+              label="Crear familia"
+              icon="add"
+              style={styles.noFamilyButton}
               onPress={() => {
                 setFamilyName('');
                 setFamilyCountryCode('MX');
                 setFamilyCurrency('MXN');
                 setShowFamilyModal(true);
               }}
-            >
-              <Ionicons name="add" size={20} color={Colors.white} />
-              <Text style={styles.createFamilyButtonText}>Crear Familia</Text>
-            </TouchableOpacity>
-          </View>
+            />
+          </Card>
         ) : (
           <>
-            {/* Stats Cards */}
-            <View style={styles.statsContainer}>
-              <View style={[styles.statCard, { backgroundColor: Colors.primary }]}>
-                <Ionicons name="people" size={24} color={Colors.white} />
-                <Text style={styles.statValue}>{children.length}</Text>
-                <Text style={styles.statLabel}>Hijos</Text>
-              </View>
-              <View style={[styles.statCard, styles.statCardYellow]}>
-                <Ionicons name="wallet" size={24} color={Colors.onSecondary} />
-                <Text style={[styles.statValue, styles.statOnYellow]}>
-                  {family.currency} {totalBalance.toFixed(2)}
-                </Text>
-                <Text style={[styles.statLabel, styles.statLabelOnYellow]}>Saldo Total</Text>
-              </View>
+            <View style={styles.statsRow}>
+              <StatTile
+                label="Por revisar"
+                value={String(pendingChores.length)}
+                icon="hourglass-outline"
+                tone={pendingChores.length > 0 ? 'accent' : 'neutral'}
+              />
+              <StatTile
+                label={`Saldo ${currency}`.trim()}
+                value={totalBalance.toFixed(2)}
+                icon="wallet-outline"
+                tone="secondary"
+                onPress={() => router.push('/(parent)/children')}
+              />
+              <StatTile
+                label="Retiros"
+                value={String(pendingWithdrawalsCount)}
+                icon="cash-outline"
+                tone={pendingWithdrawalsCount > 0 ? 'primary' : 'neutral'}
+                onPress={() => router.push('/(parent)/profile')}
+              />
             </View>
-            <View style={styles.cashReadyCard}>
-              <View style={styles.cashReadyHead}>
-                <Ionicons name="cash-outline" size={18} color={Colors.success} />
-                <Text style={styles.cashReadyTitle}>Dinero a tener listo</Text>
-              </View>
-              <Text style={styles.cashReadyAmount}>
-                {family.currency} {pendingCashNeeded.toFixed(2)}
-              </Text>
-              <Text style={styles.cashReadyHint}>
-                {pendingWithdrawalsCount > 0
-                  ? `${pendingWithdrawalsCount} retiro(s) pendientes por pagar a hijos`
-                  : 'No hay retiros pendientes ahora'}
-              </Text>
-              {pendingWithdrawalsCount > 0 ? (
-                <TouchableOpacity
-                  style={styles.cashReadyAction}
-                  onPress={() => router.push('/(parent)/profile')}
-                >
-                  <Text style={styles.cashReadyActionText}>Ver solicitudes</Text>
-                  <Ionicons name="chevron-forward" size={14} color={Colors.success} />
-                </TouchableOpacity>
-              ) : null}
+
+            <FirstRunChecklist
+              hasFamily={Boolean(family)}
+              childrenCount={children.length}
+              choresCount={choresTotalCount}
+              hasChildLoginCode={Boolean(family.child_login_code)}
+            />
+
+            <View style={styles.section}>
+              <SectionHeader
+                title="Por aprobar"
+                count={pendingChores.length}
+                actionLabel={pendingChores.length > 1 ? (selectMode ? 'Cancelar' : 'Seleccionar') : undefined}
+                onAction={() => {
+                  if (bulkApproving) return;
+                  if (selectMode) {
+                    setSelectMode(false);
+                    setSelectedChoreIds([]);
+                  } else {
+                    setSelectMode(true);
+                    setSelectedChoreIds(pendingChores.map((c) => c.id));
+                  }
+                }}
+              />
+
+              {pendingChores.length === 0 ? (
+                <Card style={styles.allClear}>
+                  <IconTile icon="checkmark-done" tone="success" size={44} />
+                  <View style={styles.flex1}>
+                    <Text style={Type.bodyStrong}>Todo al día</Text>
+                    <Text style={Type.caption}>No hay tareas esperando tu aprobación.</Text>
+                  </View>
+                </Card>
+              ) : (
+                <View style={styles.choreList}>
+                  {pendingChores.map((chore) => {
+                    const selected = selectMode && selectedChoreIds.includes(chore.id);
+                    const kid = children.find((c) => c.id === chore.completed_by);
+                    return (
+                      <Card key={chore.id} padded={false} style={[styles.choreCard, selected && styles.choreCardSelected]}>
+                        <Pressable
+                          style={styles.choreMain}
+                          onPress={() => (selectMode ? toggleChoreSelected(chore.id) : openApprove(chore))}
+                          accessibilityRole={selectMode ? 'checkbox' : 'button'}
+                          accessibilityState={selectMode ? { checked: selected } : undefined}
+                          accessibilityHint={selectMode ? undefined : 'Abre la aprobación'}
+                        >
+                          {selectMode ? (
+                            <Ionicons
+                              name={selected ? 'checkbox' : 'square-outline'}
+                              size={24}
+                              color={selected ? Colors.primary : Colors.textLight}
+                            />
+                          ) : null}
+                          {chore.photo_url ? (
+                            <Image
+                              source={{ uri: resolveMediaUrl(chore.photo_url) || chore.photo_url }}
+                              style={styles.choreThumb}
+                              contentFit="cover"
+                            />
+                          ) : (
+                            <IconTile icon="clipboard-outline" size={52} />
+                          )}
+                          <View style={styles.choreInfo}>
+                            <Text style={Type.bodyStrong} numberOfLines={2}>
+                              {chore.title}
+                            </Text>
+                            <View style={styles.choreKid}>
+                              <Image
+                                source={getChildAvatarSource(kid?.gender)}
+                                style={styles.choreKidAvatar}
+                                contentFit="cover"
+                              />
+                              <Text style={Type.caption} numberOfLines={1}>
+                                {getChildName(chore.completed_by || '')}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.choreAmount}>
+                            {currency} {chore.amount.toFixed(2)}
+                          </Text>
+                        </Pressable>
+                        {!selectMode ? (
+                          <View style={styles.choreActions}>
+                            <Button
+                              label="Rechazar"
+                              variant="secondary"
+                              fullWidth={false}
+                              style={styles.flex1}
+                              onPress={() => handleRejectChore(chore.id)}
+                            />
+                            <Button
+                              label="Aprobar"
+                              icon="checkmark"
+                              fullWidth={false}
+                              style={styles.flex1}
+                              onPress={() => openApprove(chore)}
+                            />
+                          </View>
+                        ) : null}
+                      </Card>
+                    );
+                  })}
+
+                  {selectMode ? (
+                    <Button
+                      label={`Aprobar seleccionadas (${selectedChoreIds.length})`}
+                      icon="checkmark-done"
+                      size="lg"
+                      loading={bulkApproving}
+                      disabled={selectedChoreIds.length === 0}
+                      onPress={() => runBulkApprove(selectedChoreIds)}
+                    />
+                  ) : pendingChores.length > 1 ? (
+                    <Button
+                      label={`Aprobar todas · ${currency} ${pendingTotal.toFixed(2)}`}
+                      icon="checkmark-done"
+                      variant="secondary"
+                      loading={bulkApproving}
+                      onPress={() => runBulkApprove()}
+                    />
+                  ) : null}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <SectionHeader
+                title="Tus hijos"
+                actionLabel={children.length > 0 ? 'Ver todos' : undefined}
+                onAction={() => router.push('/(parent)/children')}
+              />
+              {children.length === 0 ? (
+                <Card style={styles.allClear}>
+                  <IconTile icon="people-outline" size={44} />
+                  <View style={styles.flex1}>
+                    <Text style={Type.bodyStrong}>Aún no hay hijos</Text>
+                    <Text
+                      style={styles.inlineLink}
+                      onPress={() => router.push('/(parent)/children')}
+                      accessibilityRole="link"
+                    >
+                      Agregar primer hijo
+                    </Text>
+                  </View>
+                </Card>
+              ) : (
+                <Card padded={false} style={styles.listCard}>
+                  {children.map((child, i) => (
+                    <ListRow
+                      key={child.id}
+                      divided={i > 0}
+                      title={child.name}
+                      subtitle={`${child.age} años · Ahorro auto ${Number(child.savings_on_approve_percent ?? 0).toFixed(0)}%`}
+                      leading={
+                        <Image
+                          source={getChildAvatarSource(child.gender)}
+                          style={styles.childAvatar}
+                          contentFit="cover"
+                        />
+                      }
+                      trailing={
+                        <View style={styles.childBalance}>
+                          <Text style={styles.balanceValue}>{child.balance.toFixed(2)}</Text>
+                          <Text style={Type.caption}>{currency}</Text>
+                        </View>
+                      }
+                      onPress={() => router.push('/(parent)/children')}
+                    />
+                  ))}
+                </Card>
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <ConfettiBurst visible={showConfetti} onDone={() => setShowConfetti(false)} />
+              <DailyStreakCard
+                streak={familyStreak}
+                weekDone={weekDone}
+                currency={family.currency}
+                streakBonus={Number((family as { streak_bonus_amount?: number }).streak_bonus_amount || 0)}
+              />
+              <DailyMissionsCard
+                childrenList={children.map((c) => ({ id: c.id, name: c.name }))}
+                chores={allChores}
+                currency={family.currency}
+                onChanged={loadData}
+              />
             </View>
 
             {familyChallenge ? (
               <View style={styles.section}>
-                <View style={styles.familyChallengeCard}>
-                  <View style={styles.familyChallengeHead}>
-                    <Ionicons
-                      name={familyChallenge.all_children_hit_target ? 'ribbon' : 'people-outline'}
-                      size={20}
-                      color={familyChallenge.all_children_hit_target ? Colors.success : Colors.primary}
+                <Card style={styles.challengeCard}>
+                  <View style={styles.challengeHead}>
+                    <IconTile
+                      icon={familyChallenge.all_children_hit_target ? 'ribbon' : 'trophy'}
+                      tone={familyChallenge.all_children_hit_target ? 'success' : 'primary'}
+                      size={40}
                     />
-                    <Text style={styles.familyChallengeTitle}>
-                      Reto familiar mensual: ahorrar {familyChallenge.target_percent.toFixed(0)}%
-                    </Text>
-                  </View>
-                  <Text style={styles.familyChallengeStatus}>
-                    {familyChallenge.all_children_hit_target
-                      ? 'Insignia compartida desbloqueada. Todos van cumpliendo el reto.'
-                      : 'Aun no lo cumple toda la familia. Sigan ahorrando este mes.'}
-                  </Text>
-                  {familyChallenge.children.map((c) => (
-                    <View key={c.child_id} style={styles.familyChallengeRow}>
-                      <Text style={styles.familyChallengeChildName}>{c.name}</Text>
-                      <Text
-                        style={[
-                          styles.familyChallengeChildPct,
-                          c.hit_target ? styles.familyChallengeChildPctOk : null,
-                        ]}
-                      >
-                        {c.saved_percent.toFixed(1)}%
+                    <View style={styles.flex1}>
+                      <Text style={Type.heading}>
+                        Reto familiar: ahorrar {familyChallenge.target_percent.toFixed(0)}%
+                      </Text>
+                      <Text style={Type.caption}>
+                        {familyChallenge.all_children_hit_target
+                          ? 'Insignia compartida desbloqueada. Todos van cumpliendo el reto.'
+                          : 'Aún no lo cumple toda la familia. Sigan ahorrando este mes.'}
                       </Text>
                     </View>
-                  ))}
-                  {familyChallenge.history && familyChallenge.history.length > 0 ? (
-                    <View style={styles.familyChallengeHistory}>
-                      <Text style={styles.familyChallengeHistoryTitle}>Historial reciente</Text>
-                      {familyChallenge.history.slice(0, 4).map((h) => (
-                        <View key={h.month_key} style={styles.familyChallengeHistoryRow}>
-                          <Text style={styles.familyChallengeHistoryMonth}>{h.month_key}</Text>
-                          <Text
-                            style={[
-                              styles.familyChallengeHistoryState,
-                              h.all_children_hit_target ? styles.familyChallengeHistoryStateOk : null,
-                            ]}
-                          >
-                            {h.all_children_hit_target ? 'Completado' : 'En progreso'}
+                  </View>
+                  {familyChallenge.children.map((c) => {
+                    const target = Math.max(familyChallenge.target_percent || 1, 1);
+                    const progress = Math.min(100, (c.saved_percent / target) * 100);
+                    return (
+                      <View key={c.child_id} style={styles.challengeRow}>
+                        <View style={styles.challengeRowTop}>
+                          <Text style={Type.bodyStrong}>{c.name}</Text>
+                          <Text style={[styles.challengePct, c.hit_target && styles.challengePctOk]}>
+                            {c.saved_percent.toFixed(1)}%
                           </Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFill,
+                              {
+                                width: `${progress}%`,
+                                backgroundColor: c.hit_target ? Colors.success : Colors.primary,
+                              },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {familyChallenge.history && familyChallenge.history.length > 0 ? (
+                    <View style={styles.challengeHistory}>
+                      <Text style={Type.eyebrow}>Historial reciente</Text>
+                      {familyChallenge.history.slice(0, 4).map((h) => (
+                        <View key={h.month_key} style={styles.challengeHistoryRow}>
+                          <Text style={Type.caption}>{h.month_key}</Text>
+                          <Chip
+                            label={h.all_children_hit_target ? 'Completado' : 'En progreso'}
+                            tone={h.all_children_hit_target ? 'success' : 'neutral'}
+                          />
                         </View>
                       ))}
                     </View>
                   ) : null}
-                  <TouchableOpacity
-                    style={styles.familyChallengeLink}
+                  <Text
+                    style={styles.inlineLink}
                     onPress={() => router.push('/(parent)/family-badges')}
+                    accessibilityRole="link"
                   >
-                    <Ionicons name="ribbon-outline" size={14} color={Colors.primary} />
-                    <Text style={styles.familyChallengeLinkText}>Ver insignias familiares</Text>
-                  </TouchableOpacity>
-                </View>
+                    Ver insignias familiares
+                  </Text>
+                </Card>
               </View>
             ) : null}
 
-            {/* Pending Approvals */}
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Tareas por Aprobar</Text>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{pendingChores.length}</Text>
-                </View>
-              </View>
-              {pendingChores.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>No hay tareas pendientes de aprobación</Text>
-                </View>
-              ) : (
-                pendingChores.map((chore) => (
-                  <View key={chore.id} style={styles.choreCard}>
-                    {chore.photo_url ? (
-                      <Image
-                        source={{ uri: chore.photo_url }}
-                        style={styles.choreThumb}
-                        contentFit="cover"
-                      />
-                    ) : null}
-                    <View style={styles.choreInfo}>
-                      <Text style={styles.choreTitle}>{chore.title}</Text>
-                      <Text style={styles.choreChild}>
-                        Completada por: {getChildName(chore.completed_by || '')}
-                      </Text>
-                      <Text style={styles.choreAmount}>
-                        {family.currency} {chore.amount.toFixed(2)}
-                      </Text>
-                    </View>
-                    <View style={styles.choreActions}>
-                      <TouchableOpacity
-                        style={[styles.actionButton, styles.approveButton]}
-                        onPress={() => {
-                          setApproveTarget(chore);
-                          setRating(5);
-                          setFeedback('');
-                          setQualityBonus('');
-                        }}
-                      >
-                        <Ionicons name="checkmark" size={20} color={Colors.white} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.actionButton, styles.rejectButton]}
-                        onPress={() => handleRejectChore(chore.id)}
-                      >
-                        <Ionicons name="close" size={20} color={Colors.white} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))
-              )}
-            </View>
-
-            {/* Quick Actions */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
-              <View style={styles.quickActions}>
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push('/(parent)/children')}
-                >
-                  <Ionicons name="person-add-outline" size={26} color={Colors.primary} />
-                  <Text style={styles.quickActionText}>Agregar Hijo</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.quickActionButton}
+              <SectionHeader title="Atajos" />
+              <Card padded={false} style={styles.listCard}>
+                <ListRow
+                  title="Nueva tarea"
+                  subtitle="Asigna algo de la casa"
+                  leading={<IconTile icon="add" tone="accent" size={40} />}
                   onPress={() => router.push('/(parent)/chores')}
-                >
-                  <Ionicons name="add-circle-outline" size={26} color={Colors.accent} />
-                  <Text style={styles.quickActionText}>Nueva Tarea</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Children Summary */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Resumen de Hijos</Text>
-              {children.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>Aún no hay hijos registrados</Text>
-                  <TouchableOpacity onPress={() => router.push('/(parent)/children')}>
-                    <Text style={styles.emptyStateLink}>Agregar primer hijo</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                children.map((child) => (
-                  <View key={child.id} style={styles.childCard}>
-                    <View style={styles.childAvatar}>
-                      <Image
-                        source={getChildAvatarSource(child.gender)}
-                        style={styles.childAvatarImage}
-                        contentFit="cover"
-                      />
-                    </View>
-                    <View style={styles.childInfo}>
-                      <Text style={styles.childName}>{child.name}</Text>
-                      <Text style={styles.childAge}>{child.age} años</Text>
-                      <View style={styles.savingsBadge}>
-                        <Ionicons name="leaf-outline" size={12} color={Colors.primary} />
-                        <Text style={styles.savingsBadgeText}>
-                          Ahorro automático {Number(child.savings_on_approve_percent ?? 0).toFixed(0)}%
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.childBalance}>
-                      <Text style={styles.balanceLabel}>Saldo</Text>
-                      <Text style={styles.balanceValue}>
-                        {family.currency} {child.balance.toFixed(2)}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
+                />
+                <ListRow
+                  divided
+                  title="Agregar hijo"
+                  subtitle="Perfil, PIN y ahorro"
+                  leading={<IconTile icon="person-add-outline" tone="primary" size={40} />}
+                  onPress={() => router.push('/(parent)/children')}
+                />
+                <ListRow
+                  divided
+                  title="Metas y retiros"
+                  subtitle={goalsCardHint}
+                  leading={<IconTile icon="trophy-outline" tone="secondary" size={40} />}
+                  onPress={() =>
+                    router.push(pendingWithdrawalsCount > 0 ? '/(parent)/profile' : '/(parent)/goals')
+                  }
+                />
+                <ListRow
+                  divided
+                  title="Progreso familiar"
+                  subtitle={journeyHint}
+                  leading={<IconTile icon="map-outline" tone="success" size={40} />}
+                  onPress={() =>
+                    router.push(familyChallenge ? '/(parent)/family-badges' : '/(parent)/reports')
+                  }
+                />
+              </Card>
             </View>
           </>
         )}
       </ScrollView>
 
-      <Modal
+      <AppModal
         visible={!!approveTarget}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setApproveTarget(null)}
+        onClose={() => setApproveTarget(null)}
+        title="Aprobar tarea"
+        icon="checkmark-circle"
+        iconTone="success"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setApproveTarget(null)}
+            confirmLabel="Aprobar y pagar"
+            onConfirm={submitApprove}
+            confirming={approving}
+            confirmTone="success"
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView
-              style={styles.approveModalScroll}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              bounces={false}
-              contentContainerStyle={styles.approveModalScrollContent}
-            >
-              <Text style={styles.modalTitle}>Aprobar tarea</Text>
-              {approveTarget?.photo_url ? (
-                <Image
-                  source={{ uri: approveTarget.photo_url }}
-                  style={styles.evidenceImage}
-                  contentFit="contain"
-                />
-              ) : null}
-              <Text style={styles.approveHint}>Calificación (1–5)</Text>
-              <View style={styles.starsRow}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <TouchableOpacity key={n} onPress={() => setRating(n)}>
-                    <Ionicons
-                      name={n <= rating ? 'star' : 'star-outline'}
-                      size={32}
-                      color={n <= rating ? Colors.secondary : Colors.textLight}
-                    />
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Text style={styles.inputLabel}>Bono extra por buen trabajo (opcional)</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="0"
-                keyboardType="decimal-pad"
-                value={qualityBonus}
-                onChangeText={setQualityBonus}
-                placeholderTextColor={Colors.textLight}
+        {approveTarget?.photo_url ? (
+          <Image
+            source={{
+              uri: resolveMediaUrl(approveTarget.photo_url) || approveTarget.photo_url,
+            }}
+            style={styles.evidenceImage}
+            contentFit="contain"
+          />
+        ) : null}
+        <Text style={modalFieldStyles.label}>Calificación (1–5)</Text>
+        <View style={styles.starsRow}>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <TouchableOpacity key={n} onPress={() => setRating(n)}>
+              <Ionicons
+                name={n <= rating ? 'star' : 'star-outline'}
+                size={32}
+                color={n <= rating ? Colors.secondary : Colors.textLight}
               />
-              <Text style={styles.inputLabel}>Feedback para tu hijo (opcional)</Text>
-              <TextInput
-                style={[styles.textInput, { minHeight: 72 }]}
-                placeholder="¡Buen trabajo!"
-                value={feedback}
-                onChangeText={setFeedback}
-                multiline
-                placeholderTextColor={Colors.textLight}
-              />
-              {approveTarget?.completed_by ? (
-                <>
-                  <ApproveSavingsControls
-                    currency={family?.currency ?? ''}
-                    childDefaultPercent={childDefaultApprovePct}
-                    goals={approveSavingsGoals}
-                    mode={approveSavingsMode}
-                    onModeChange={(m) => {
-                      setApproveSavingsMode(m);
-                      if (m === 'percent' && approveChild?.savings_on_approve_percent != null) {
-                        const p = Number(approveChild.savings_on_approve_percent);
-                        if (!Number.isNaN(p)) setApproveSavingsPercentStr(String(p));
-                      }
-                    }}
-                    percentStr={approveSavingsPercentStr}
-                    onPercentStrChange={setApproveSavingsPercentStr}
-                    amountStr={approveSavingsAmountStr}
-                    onAmountStrChange={setApproveSavingsAmountStr}
-                    goalId={approveSavingsGoalId}
-                    onGoalIdChange={setApproveSavingsGoalId}
-                    reasonNote={approveSavingsReasonNote}
-                    onReasonNoteChange={setApproveSavingsReasonNote}
-                  />
-                  <SavingsSplitPreviewBox
-                    currency={family?.currency ?? ''}
-                    loading={splitLoading}
-                    preview={splitPreview}
-                  />
-                </>
-              ) : null}
-            </ScrollView>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelButton} onPress={() => setApproveTarget(null)}>
-                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalSubmitButton, approving && styles.buttonDisabled]}
-                onPress={submitApprove}
-                disabled={approving}
-              >
-                {approving ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.modalSubmitButtonText}>Aprobar y pagar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+            </TouchableOpacity>
+          ))}
         </View>
-      </Modal>
+        <Text style={modalFieldStyles.label}>Bono extra por buen trabajo (opcional)</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="0"
+          keyboardType="decimal-pad"
+          value={qualityBonus}
+          onChangeText={setQualityBonus}
+          placeholderTextColor={Colors.textLight}
+        />
+        <Text style={modalFieldStyles.label}>Feedback para tu hijo (opcional)</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="¡Buen trabajo!"
+          value={feedback}
+          onChangeText={setFeedback}
+          multiline
+          placeholderTextColor={Colors.textLight}
+        />
+        {approveTarget?.completed_by ? (
+          <>
+            <ApproveSavingsControls
+              currency={family?.currency ?? ''}
+              childDefaultPercent={childDefaultApprovePct}
+              goals={approveSavingsGoals}
+              mode={approveSavingsMode}
+              onModeChange={(m) => {
+                setApproveSavingsMode(m);
+                if (m === 'percent' && approveChild?.savings_on_approve_percent != null) {
+                  const p = Number(approveChild.savings_on_approve_percent);
+                  if (!Number.isNaN(p)) setApproveSavingsPercentStr(String(p));
+                }
+              }}
+              percentStr={approveSavingsPercentStr}
+              onPercentStrChange={setApproveSavingsPercentStr}
+              amountStr={approveSavingsAmountStr}
+              onAmountStrChange={setApproveSavingsAmountStr}
+              goalId={approveSavingsGoalId}
+              onGoalIdChange={setApproveSavingsGoalId}
+              reasonNote={approveSavingsReasonNote}
+              onReasonNoteChange={setApproveSavingsReasonNote}
+            />
+            <SavingsSplitPreviewBox
+              currency={family?.currency ?? ''}
+              loading={splitLoading}
+              preview={splitPreview}
+            />
+          </>
+        ) : null}
+      </AppModal>
 
-      {/* Create Family Modal */}
-      <Modal
+      <AppModal
         visible={showFamilyModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowFamilyModal(false)}
+        onClose={() => setShowFamilyModal(false)}
+        title="Crear Familia"
+        icon="people"
+        iconTone="primary"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowFamilyModal(false)}
+            confirmLabel="Crear"
+            onConfirm={handleCreateFamily}
+            confirming={creatingFamily}
+          />
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              style={styles.modalScroll}
-            >
-              <Text style={styles.modalTitle}>Crear Familia</Text>
-
-              <View style={styles.modalInput}>
-                <Text style={styles.inputLabel}>Nombre de la Familia</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej: Familia García"
-                  placeholderTextColor={Colors.textLight}
-                  value={familyName}
-                  onChangeText={setFamilyName}
-                />
-              </View>
-
-              <FamilyLocaleSection
-                countryCode={familyCountryCode}
-                currency={familyCurrency}
-                onCountryChange={setFamilyCountryCode}
-                onCurrencyChange={setFamilyCurrency}
-              />
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowFamilyModal(false)}
-              >
-                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalSubmitButton, creatingFamily && styles.buttonDisabled]}
-                onPress={handleCreateFamily}
-                disabled={creatingFamily}
-              >
-                {creatingFamily ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.modalSubmitButtonText}>Crear</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        <Text style={modalFieldStyles.label}>Nombre de la Familia</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Ej: Familia García"
+          placeholderTextColor={Colors.textLight}
+          value={familyName}
+          onChangeText={setFamilyName}
+        />
+        <FamilyLocaleSection
+          countryCode={familyCountryCode}
+          currency={familyCurrency}
+          onCountryChange={setFamilyCountryCode}
+          onCurrencyChange={setFamilyCurrency}
+        />
+      </AppModal>
     </View>
   );
 }
@@ -789,200 +977,191 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.background,
   },
+  flex1: {
+    flex: 1,
+    minWidth: 0,
+  },
+  center: {
+    textAlign: 'center',
+  },
   header: {
+    backgroundColor: Colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  flag: {
+    borderRadius: 0,
+  },
+  headerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
+    gap: Spacing.sm + 2,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.md + 2,
+  },
+  parentAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: Colors.surface,
+    borderWidth: 2,
+    borderColor: Colors.secondary,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 2,
   },
   greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 4,
-  },
-  logoutButton: {
-    padding: 8,
+    fontSize: 22,
+    lineHeight: 28,
   },
   content: {
     flex: 1,
-    padding: 16,
   },
-  noFamilyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  noFamilyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-  },
-  noFamilySubtext: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  createFamilyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  createFamilyButtonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  statCard: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  statCardYellow: {
-    backgroundColor: Colors.secondary,
-    borderWidth: 1,
-    borderColor: Colors.secondaryDark,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.white,
-    marginTop: 8,
-  },
-  statOnYellow: {
-    color: Colors.onSecondary,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: Colors.white,
-    opacity: 0.8,
-    marginTop: 4,
-  },
-  statLabelOnYellow: {
-    color: Colors.onSecondaryMuted,
-    opacity: 1,
-  },
-  cashReadyCard: {
-    backgroundColor: Colors.success + '14',
-    borderWidth: 1,
-    borderColor: Colors.success + '44',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 18,
-  },
-  cashReadyHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  cashReadyTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.success,
-  },
-  cashReadyAmount: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.success,
-  },
-  cashReadyHint: {
-    marginTop: 3,
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  cashReadyAction: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: Colors.success + '12',
-  },
-  cashReadyActionText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.success,
+  contentInner: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    gap: Spacing.xs,
   },
   section: {
-    marginBottom: 24,
+    marginTop: Spacing.xl,
   },
-  sectionHeader: {
+  statsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm + 2,
+    marginBottom: Spacing.sm,
+  },
+  noFamilyCard: {
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xxl,
+    marginTop: Spacing.lg,
+  },
+  noFamilyButton: {
+    marginTop: Spacing.sm,
+  },
+  allClear: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: Spacing.md,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  badge: {
-    backgroundColor: Colors.error,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  badgeText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyState: {
-    backgroundColor: Colors.surface,
-    padding: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  emptyStateLink: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 8,
+  choreList: {
+    gap: Spacing.md,
   },
   choreCard: {
-    backgroundColor: Colors.surface,
-    padding: 16,
-    borderRadius: 12,
+    borderRadius: Radius.xl,
+  },
+  choreCardSelected: {
+    borderColor: Colors.primary,
+    borderWidth: 1.5,
+  },
+  choreMain: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    gap: 10,
+    gap: Spacing.md,
+    padding: Spacing.md + 2,
   },
   choreThumb: {
     width: 52,
     height: 52,
-    borderRadius: 8,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.surfaceAlt,
   },
   choreInfo: {
     flex: 1,
+    minWidth: 0,
+    gap: Spacing.xs,
+  },
+  choreKid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  choreKidAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  choreAmount: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.secondaryInk,
+  },
+  choreActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md + 2,
+    paddingBottom: Spacing.md + 2,
+  },
+  listCard: {
+    overflow: 'hidden',
+  },
+  childAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  childBalance: {
+    alignItems: 'flex-end',
+    marginRight: 2,
+  },
+  balanceValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  inlineLink: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginTop: 2,
+  },
+  challengeCard: {
+    gap: Spacing.md,
+  },
+  challengeHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+  },
+  challengeRow: {
+    gap: 6,
+  },
+  challengeRowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  challengePct: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  challengePctOk: {
+    color: Colors.success,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: Radius.pill,
+  },
+  challengeHistory: {
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  challengeHistoryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   evidenceImage: {
     width: '100%',
@@ -991,305 +1170,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: Colors.background,
   },
-  approveHint: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
   starsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 6,
     marginBottom: 16,
-  },
-  choreTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  choreChild: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 4,
-  },
-  choreAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.onSecondary,
-    marginTop: 4,
-  },
-  choreActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  approveButton: {
-    backgroundColor: Colors.success,
-  },
-  rejectButton: {
-    backgroundColor: Colors.error,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-  },
-  quickActionButton: {
-    flex: 1,
-    backgroundColor: Colors.surface,
-    padding: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    gap: 8,
-  },
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.text,
-  },
-  childCard: {
-    backgroundColor: Colors.surface,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  childAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: Colors.primaryLight,
-    backgroundColor: Colors.surfaceAlt,
-  },
-  childAvatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  childInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  childName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  childAge: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  savingsBadge: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary + '12',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  savingsBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  childBalance: {
-    alignItems: 'flex-end',
-  },
-  balanceLabel: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-  },
-  balanceValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '92%',
-    flexDirection: 'column',
-  },
-  approveModalScroll: {
-    flexGrow: 0,
-    flexShrink: 1,
-    maxHeight: 460,
-  },
-  approveModalScrollContent: {
-    paddingBottom: 8,
-  },
-  modalScroll: {
-    maxHeight: 480,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  modalInput: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  modalCancelButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-  },
-  modalCancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  modalSubmitButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-  },
-  modalSubmitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  familyChallengeCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  familyChallengeHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  familyChallengeTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  familyChallengeStatus: {
-    marginTop: 6,
-    fontSize: 13,
-    color: Colors.textSecondary,
-  },
-  familyChallengeRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  familyChallengeChildName: {
-    fontSize: 13,
-    color: Colors.text,
-    fontWeight: '600',
-  },
-  familyChallengeChildPct: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '700',
-  },
-  familyChallengeChildPctOk: {
-    color: Colors.success,
-  },
-  familyChallengeHistory: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  familyChallengeHistoryTitle: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 6,
-    fontWeight: '600',
-  },
-  familyChallengeHistoryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  familyChallengeHistoryMonth: {
-    fontSize: 12,
-    color: Colors.text,
-    fontWeight: '600',
-  },
-  familyChallengeHistoryState: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: '700',
-  },
-  familyChallengeHistoryStateOk: {
-    color: Colors.success,
-  },
-  familyChallengeLink: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.primary + '12',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  familyChallengeLinkText: {
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '700',
   },
 });

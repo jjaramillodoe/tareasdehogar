@@ -3,9 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  RefreshControl,
-  ActivityIndicator,
   TouchableOpacity,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -13,8 +10,10 @@ import { useAuthStore } from '../../src/store/authStore';
 import { goalsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
+import ChildScreenShell, { ChildEmptyState } from '../../src/components/ChildScreenShell';
+import AccordionSection from '../../src/components/AccordionSection';
 import { ChildSavingsGoalsSection } from '../../src/components/SavingsGoalsSections';
+import { shadow } from '../../src/utils/shadow';
 
 interface Goal {
   id: string;
@@ -66,177 +65,168 @@ export default function ChildGoalsScreen() {
 
   if (!selectedChild) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.emptyText}>Inicia sesión de nuevo</Text>
-      </View>
+      <ChildScreenShell title="Metas" subtitle="Inicia sesión de nuevo">
+        <ChildEmptyState icon="alert-circle-outline" title="No hay sesión activa" />
+      </ChildScreenShell>
     );
   }
 
   const active = goals.filter((g) => !g.is_completed);
   const done = goals.filter((g) => g.is_completed);
+  const name = selectedChild.alias || selectedChild.name;
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Mis metas</Text>
-        <View style={styles.segment}>
-          <TouchableOpacity
-            style={[styles.segmentChip, goalTab === 'tasks' && styles.segmentChipActive]}
-            onPress={() => setGoalTab('tasks')}
-          >
-            <Text style={[styles.segmentText, goalTab === 'tasks' && styles.segmentTextActive]}>Por tareas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.segmentChip, goalTab === 'savings' && styles.segmentChipActive]}
-            onPress={() => setGoalTab('savings')}
-          >
-            <Text style={[styles.segmentText, goalTab === 'savings' && styles.segmentTextActive]}>Ahorro</Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.headerSubtitle}>
-          {goalTab === 'tasks'
-            ? 'Completa tareas para avanzar; tu familia define el bono'
-            : 'Apartar dinero de tu saldo para una meta que elijan tus padres'}
+  const tabs = (
+    <View style={styles.segment}>
+      <TouchableOpacity
+        style={[styles.segmentChip, goalTab === 'tasks' && styles.segmentChipActive]}
+        onPress={() => setGoalTab('tasks')}
+        activeOpacity={0.9}
+      >
+        <Text style={[styles.segmentText, goalTab === 'tasks' && styles.segmentTextActive]}>
+          Por tareas
         </Text>
-      </View>
-      <FlagStripe height={3} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.segmentChip, goalTab === 'savings' && styles.segmentChipActive]}
+        onPress={() => setGoalTab('savings')}
+        activeOpacity={0.9}
+      >
+        <Text style={[styles.segmentText, goalTab === 'savings' && styles.segmentTextActive]}>
+          Ahorro
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
 
-      {goalTab === 'savings' ? (
+  if (goalTab === 'savings') {
+    return (
+      <ChildScreenShell
+        title="Metas"
+        subtitle={`Objetivos de ${name}`}
+        accent="yellow"
+        headerExtra={tabs}
+        scroll={false}
+      >
         <View style={styles.savingsWrap}>
           <ChildSavingsGoalsSection currency={family?.currency ?? ''} />
         </View>
-      ) : isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
+      </ChildScreenShell>
+    );
+  }
+
+  return (
+    <ChildScreenShell
+      title="Metas"
+      subtitle={
+        goalTab === 'tasks'
+          ? 'Completa tareas para avanzar; tu familia define el bono'
+          : 'Propón una meta o aporta de tu saldo'
+      }
+      loading={isLoading}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        load();
+      }}
+      headerExtra={tabs}
+      accent="yellow"
+    >
+      {goals.length === 0 ? (
+        <ChildEmptyState
+          icon="flag-outline"
+          title="Aún no hay metas"
+          subtitle="Cuando tus padres creen una meta para ti, aparecerá aquí con tu progreso."
+        />
       ) : (
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollPad}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
-        }
-      >
-        {goals.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="flag-outline" size={48} color={Colors.textLight} />
-            <Text style={styles.emptyTitle}>Aún no hay metas</Text>
-            <Text style={styles.emptySub}>
-              Cuando tus padres creen una meta para ti, aparecerá aquí con tu progreso.
-            </Text>
-          </View>
-        ) : (
-          <>
-            {active.length > 0 && (
-              <View style={styles.sectionHeadRow}>
-                <Text style={styles.sectionTitle}>En progreso</Text>
-                <View style={styles.sectionCountBadge}>
-                  <Text style={styles.sectionCountText}>{active.length}</Text>
+        <>
+          {active.length > 0 && (
+            <View style={styles.sectionHeadRow}>
+              <Text style={styles.sectionTitle}>En progreso</Text>
+              <View style={styles.sectionCountBadge}>
+                <Text style={styles.sectionCountText}>{active.length}</Text>
+              </View>
+            </View>
+          )}
+          {active.map((g) => (
+            <View key={g.id} style={styles.card}>
+              <View style={styles.cardHead}>
+                <View style={styles.iconWrap}>
+                  <Ionicons name="trophy" size={20} color={Colors.secondaryInk} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{g.title}</Text>
+                  <Text style={styles.periodBadge}>{periodLabel(g)}</Text>
                 </View>
               </View>
-            )}
-            {active.map((g) => (
-              <View key={g.id} style={styles.card}>
-                <View style={styles.cardHead}>
-                  <View style={styles.iconWrap}>
-                    <Ionicons name="trophy" size={20} color={Colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{g.title}</Text>
-                    <Text style={styles.periodBadge}>{periodLabel(g)}</Text>
-                  </View>
-                </View>
-                {g.description ? (
-                  <Text style={styles.desc}>{g.description}</Text>
-                ) : null}
-                <View style={styles.barBg}>
-                  <View style={[styles.barFill, { width: `${progress(g)}%` }]} />
-                </View>
-                <Text style={styles.progressTxt}>
-                  {g.completed_tasks} / {g.target_tasks} tareas
+              {g.description ? <Text style={styles.desc}>{g.description}</Text> : null}
+              <View style={styles.barBg}>
+                <View style={[styles.barFill, { width: `${progress(g)}%` }]} />
+              </View>
+              <Text style={styles.progressTxt}>
+                {g.completed_tasks} / {g.target_tasks} tareas
+              </Text>
+              <View style={styles.bonusRow}>
+                <Ionicons name="gift-outline" size={18} color={Colors.accent} />
+                <Text style={styles.bonusTxt}>
+                  Bono: {family?.currency} {g.bonus_amount.toFixed(2)}
                 </Text>
-                <View style={styles.bonusRow}>
-                  <Ionicons name="gift-outline" size={18} color={Colors.secondary} />
-                  <Text style={styles.bonusTxt}>
-                    Bono: {family?.currency} {g.bonus_amount.toFixed(2)}
+              </View>
+            </View>
+          ))}
+
+          {done.length > 0 && (
+            <AccordionSection title="Completadas" count={done.length} defaultOpen={false}>
+              {done.map((g) => (
+                <View key={g.id} style={[styles.card, styles.cardDone]}>
+                  <View style={styles.cardHead}>
+                    <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
+                    <Text style={styles.cardTitle}>{g.title}</Text>
+                  </View>
+                  <Text style={styles.doneMeta}>
+                    Bono {family?.currency} {g.bonus_amount.toFixed(2)}
+                    {g.bonus_paid ? ' · Pagado' : ' · Pendiente de pago'}
                   </Text>
                 </View>
-              </View>
-            ))}
-
-            {done.length > 0 && (
-              <>
-                <View style={[styles.sectionHeadRow, { marginTop: 8 }]}>
-                  <Text style={styles.sectionTitle}>Completadas</Text>
-                  <View style={styles.sectionCountBadgeMuted}>
-                    <Text style={styles.sectionCountTextMuted}>{done.length}</Text>
-                  </View>
-                </View>
-                {done.map((g) => (
-                  <View key={g.id} style={[styles.card, styles.cardDone]}>
-                    <View style={styles.cardHead}>
-                      <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
-                      <Text style={styles.cardTitle}>{g.title}</Text>
-                    </View>
-                    <Text style={styles.doneMeta}>
-                      Bono {family?.currency} {g.bonus_amount.toFixed(2)}
-                      {g.bonus_paid ? ' · Pagado' : ' · Pendiente de pago'}
-                    </Text>
-                  </View>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </ScrollView>
+              ))}
+            </AccordionSection>
+          )}
+        </>
       )}
-    </View>
+    </ChildScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
-  emptyText: { color: Colors.textSecondary },
-  header: {
-    padding: 20,
-    paddingTop: 56,
-    backgroundColor: Colors.surface,
-  },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: Colors.text },
   segment: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 14,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   segmentChip: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: Colors.background,
+    borderRadius: 11,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   segmentChipActive: {
-    backgroundColor: Colors.primary + '22',
-    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
   },
   segmentText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textSecondary,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.88)',
   },
   segmentTextActive: {
     color: Colors.primary,
   },
-  savingsWrap: { flex: 1, paddingHorizontal: 16, paddingBottom: 12 },
-  headerSubtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: 10, lineHeight: 20 },
-  content: { flex: 1 },
-  scrollPad: { padding: 16, paddingBottom: 32 },
+  savingsWrap: { flex: 1, marginTop: -4 },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '800',
     color: Colors.text,
   },
   sectionHeadRow: {
@@ -273,14 +263,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textSecondary,
   },
-  emptyCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 28,
-    alignItems: 'center',
-  },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: Colors.text, marginTop: 12 },
-  emptySub: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: 16,
@@ -288,21 +270,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: Colors.border,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 3, blur: 10, opacity: 0.08, elevation: 3 }),
   },
-  cardDone: { borderWidth: 1, borderColor: Colors.success + '40' },
+  cardDone: { borderColor: Colors.success + '40' },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconWrap: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: Colors.primary + '18',
+    backgroundColor: Colors.secondary + '44',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: Colors.text, flex: 1 },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: Colors.text, flex: 1 },
   periodBadge: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.primary,
     marginTop: 4,
     textTransform: 'capitalize',
@@ -325,8 +308,9 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 8,
     textAlign: 'right',
+    fontWeight: '600',
   },
   bonusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-  bonusTxt: { fontSize: 14, fontWeight: '600', color: Colors.primary },
+  bonusTxt: { fontSize: 14, fontWeight: '700', color: Colors.primary },
   doneMeta: { fontSize: 13, color: Colors.textSecondary, marginTop: 8, marginLeft: 32 },
 });

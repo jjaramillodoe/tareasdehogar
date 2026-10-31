@@ -10,6 +10,7 @@ interface User {
   role: string;
   family_id: string | null;
   family_role?: string | null;
+  gender?: 'mujer' | 'hombre' | null;
 }
 
 interface Family {
@@ -91,12 +92,19 @@ interface AuthState {
 
   initialize: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, inviteCode?: string) => Promise<void>;
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    inviteCode?: string,
+    gender?: 'mujer' | 'hombre'
+  ) => Promise<void>;
   childLogin: (familyCode: string, childName: string, pin?: string) => Promise<void>;
   logout: () => Promise<void>;
   setFamily: (family: Family) => void;
   refreshUser: () => Promise<void>;
   refreshFamily: () => Promise<void>;
+  updateProfile: (data: { gender?: 'mujer' | 'hombre' }) => Promise<void>;
   setSelectedChild: (child: Child | null) => void;
   touchActivity: () => Promise<void>;
   enforceAutoLogout: () => Promise<boolean>;
@@ -181,10 +189,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  register: async (email: string, password: string, name: string, inviteCode?: string) => {
+  register: async (
+    email: string,
+    password: string,
+    name: string,
+    inviteCode?: string,
+    gender?: 'mujer' | 'hombre'
+  ) => {
     set({ isLoading: true });
     try {
-      const response = await authAPI.register(email, password, name, inviteCode);
+      const response = await authAPI.register(email, password, name, inviteCode, undefined, gender);
       await AsyncStorage.setItem('token', response.access_token);
       await AsyncStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
       set({
@@ -238,6 +252,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setFamily: (family: Family) => {
     set({ family });
+  },
+
+  updateProfile: async (data) => {
+    const user = await authAPI.updateProfile(data);
+    set({ user });
   },
 
   refreshUser: async () => {

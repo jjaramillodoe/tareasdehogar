@@ -3,11 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  RefreshControl,
-  ActivityIndicator,
-  Modal,
   TextInput,
   Alert,
 } from 'react-native';
@@ -16,6 +12,9 @@ import { useAuthStore } from '../../src/store/authStore';
 import { paymentsAPI, statsAPI, withdrawalsAPI } from '../../src/services/api';
 import { Colors } from '../../src/constants/colors';
 import { Ionicons } from '@expo/vector-icons';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
+import ChildScreenShell, { ChildEmptyState } from '../../src/components/ChildScreenShell';
+import { shadow } from '../../src/utils/shadow';
 
 interface Payment {
   id: string;
@@ -117,7 +116,7 @@ export default function ChildPaymentsScreen() {
   const netHistorial = totalIngresos - totalRetiros;
   const pendingWd = withdrawals.find((w) => w.status === 'pending');
   const pendingWdCount = withdrawals.filter((w) => w.status === 'pending').length;
-  const availableNow = availableBalance ?? selectedChild.balance;
+  const availableNow = availableBalance ?? selectedChild?.balance ?? 0;
 
   const submitWithdrawal = async () => {
     if (!selectedChild) return;
@@ -155,69 +154,52 @@ export default function ChildPaymentsScreen() {
 
   if (!selectedChild) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Historial de Pagos</Text>
-        </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>No hay hijo seleccionado</Text>
-        </View>
-      </View>
+      <ChildScreenShell title="Pagos" showBack>
+        <ChildEmptyState icon="alert-circle-outline" title="No hay hijo seleccionado" />
+      </ChildScreenShell>
     );
   }
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  const currency = family?.currency || 'USD';
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Historial de Pagos</Text>
-        <Text style={styles.headerSubtitle}>Movimientos y retiros</Text>
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              loadPayments();
-            }}
-          />
-        }
-      >
-        {/* Summary Card */}
+    <>
+    <ChildScreenShell
+      title="Pagos"
+      subtitle="Movimientos y retiros"
+      loading={isLoading}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        loadPayments();
+      }}
+      showBack
+      accent="blue"
+    >
         <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Neto del historial</Text>
+          <Text style={styles.summaryAmount}>
+            {currency} {netHistorial.toFixed(2)}
+          </Text>
           <View style={styles.summaryBreakdown}>
             <Text style={styles.summaryBreakdownLine}>
-              Ingresos: {family?.currency} {totalIngresos.toFixed(2)}
+              Ingresos: {currency} {totalIngresos.toFixed(2)}
             </Text>
             {totalRetiros > 0 ? (
               <Text style={styles.summaryBreakdownDebit}>
-                Retiros: −{family?.currency} {totalRetiros.toFixed(2)}
+                Retiros: −{currency} {totalRetiros.toFixed(2)}
               </Text>
             ) : null}
           </View>
-          <Text style={styles.summaryLabel}>Neto del historial</Text>
-          <Text style={styles.summaryAmount}>
-            {family?.currency} {netHistorial.toFixed(2)}
-          </Text>
           <Text style={styles.summaryCount}>{payments.length} movimientos</Text>
           <Text style={styles.balanceHint}>
-            Saldo actual: {family?.currency} {selectedChild.balance.toFixed(2)}
+            Saldo actual: {currency} {selectedChild.balance.toFixed(2)}
           </Text>
           <Text style={styles.balanceHint}>
-            Disponible ahora: {family?.currency} {(availableBalance ?? selectedChild.balance).toFixed(2)}
+            Disponible ahora: {currency} {(availableBalance ?? selectedChild.balance).toFixed(2)}
           </Text>
           <Text style={styles.balanceHint}>
-            En espera (24h): {family?.currency} {cooldownLocked.toFixed(2)}
+            En espera (24h): {currency} {cooldownLocked.toFixed(2)}
           </Text>
         </View>
 
@@ -366,111 +348,100 @@ export default function ChildPaymentsScreen() {
             })
           )}
         </View>
-      </ScrollView>
+    </ChildScreenShell>
 
-      <Modal visible={showWithdrawModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Solicitar retiro</Text>
-            <Text style={styles.modalSub}>
-              Máximo disponible: {family?.currency}{' '}
-              {availableNow.toFixed(2)}
-            </Text>
-            <View style={styles.quickPctRow}>
-              {[10, 25, 50, 75, 100].map((pct) => (
-                <TouchableOpacity
-                  key={pct}
-                  style={styles.quickPctChip}
-                  onPress={() =>
-                    setWdAmount(((availableNow * pct) / 100).toFixed(2))
-                  }
-                >
-                  <Text style={styles.quickPctChipText}>{pct}%</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.quickPctHint}>
-              Selección rápida según tu saldo disponible ahora.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Monto"
-              placeholderTextColor={Colors.textLight}
-              keyboardType="decimal-pad"
-              value={wdAmount}
-              onChangeText={setWdAmount}
-            />
-            <TextInput
-              style={[styles.modalInput, { minHeight: 72 }]}
-              placeholder="Nota (opcional)"
-              placeholderTextColor={Colors.textLight}
-              value={wdNote}
-              onChangeText={setWdNote}
-              multiline
-            />
-            <Text style={styles.reflectLabel}>¿Es necesidad o deseo?</Text>
-            <View style={styles.reflectRow}>
-              <TouchableOpacity
-                style={[
-                  styles.reflectOption,
-                  wdPurposeType === 'necesidad' && styles.reflectOptionActive,
-                ]}
-                onPress={() => setWdPurposeType('necesidad')}
-              >
-                <Text
-                  style={[
-                    styles.reflectOptionText,
-                    wdPurposeType === 'necesidad' && styles.reflectOptionTextActive,
-                  ]}
-                >
-                  Necesidad
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.reflectOption, wdPurposeType === 'deseo' && styles.reflectOptionActive]}
-                onPress={() => setWdPurposeType('deseo')}
-              >
-                <Text
-                  style={[
-                    styles.reflectOptionText,
-                    wdPurposeType === 'deseo' && styles.reflectOptionTextActive,
-                  ]}
-                >
-                  Deseo
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={[styles.modalInput, { minHeight: 62 }]}
-              placeholder="¿Cómo impacta tu meta de ahorro? (opcional)"
-              placeholderTextColor={Colors.textLight}
-              value={wdGoalImpact}
-              onChangeText={setWdGoalImpact}
-              multiline
-            />
-            <View style={styles.modalRow}>
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setShowWithdrawModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalOk, wdSubmitting && { opacity: 0.7 }]}
-                onPress={submitWithdrawal}
-                disabled={wdSubmitting}
-              >
-                {wdSubmitting ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.modalOkText}>Enviar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+      <AppModal
+        visible={showWithdrawModal}
+        onClose={() => setShowWithdrawModal(false)}
+        title="Solicitar retiro"
+        subtitle={`Máximo disponible: ${family?.currency} ${availableNow.toFixed(2)}`}
+        icon="wallet-outline"
+        iconTone="primary"
+        variant="sheet"
+        size="lg"
+        footer={
+          <AppModalActions
+            onCancel={() => setShowWithdrawModal(false)}
+            confirmLabel="Enviar"
+            onConfirm={submitWithdrawal}
+            confirming={wdSubmitting}
+          />
+        }
+      >
+        <View style={styles.quickPctRow}>
+          {[10, 25, 50, 75, 100].map((pct) => (
+            <TouchableOpacity
+              key={pct}
+              style={styles.quickPctChip}
+              onPress={() => setWdAmount(((availableNow * pct) / 100).toFixed(2))}
+            >
+              <Text style={styles.quickPctChipText}>{pct}%</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </Modal>
-    </View>
+        <Text style={styles.quickPctHint}>
+          Selección rápida según tu saldo disponible ahora.
+        </Text>
+        <Text style={modalFieldStyles.label}>Monto</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Monto"
+          placeholderTextColor={Colors.textLight}
+          keyboardType="decimal-pad"
+          value={wdAmount}
+          onChangeText={setWdAmount}
+        />
+        <Text style={modalFieldStyles.label}>Nota (opcional)</Text>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="Nota (opcional)"
+          placeholderTextColor={Colors.textLight}
+          value={wdNote}
+          onChangeText={setWdNote}
+          multiline
+        />
+        <Text style={styles.reflectLabel}>¿Es necesidad o deseo?</Text>
+        <View style={styles.reflectRow}>
+          <TouchableOpacity
+            style={[
+              styles.reflectOption,
+              wdPurposeType === 'necesidad' && styles.reflectOptionActive,
+            ]}
+            onPress={() => setWdPurposeType('necesidad')}
+          >
+            <Text
+              style={[
+                styles.reflectOptionText,
+                wdPurposeType === 'necesidad' && styles.reflectOptionTextActive,
+              ]}
+            >
+              Necesidad
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.reflectOption, wdPurposeType === 'deseo' && styles.reflectOptionActive]}
+            onPress={() => setWdPurposeType('deseo')}
+          >
+            <Text
+              style={[
+                styles.reflectOptionText,
+                wdPurposeType === 'deseo' && styles.reflectOptionTextActive,
+              ]}
+            >
+              Deseo
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <TextInput
+          style={[modalFieldStyles.input, modalFieldStyles.inputMultiline]}
+          placeholder="¿Cómo impacta tu meta de ahorro? (opcional)"
+          placeholderTextColor={Colors.textLight}
+          value={wdGoalImpact}
+          onChangeText={setWdGoalImpact}
+          multiline
+        />
+      </AppModal>
+    </>
   );
 }
 
@@ -515,51 +486,51 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   summaryCard: {
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.primary,
     borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
+    padding: 20,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: Colors.secondaryDark,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 8, blur: 18, opacity: 0.28, elevation: 8 }),
   },
   summaryBreakdown: {
-    alignSelf: 'stretch',
-    marginBottom: 12,
+    marginTop: 12,
     gap: 4,
   },
   summaryBreakdownLine: {
     fontSize: 13,
-    color: Colors.onSecondaryMuted,
-    textAlign: 'center',
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
   },
   summaryBreakdownDebit: {
     fontSize: 13,
-    color: Colors.onSecondary,
-    fontWeight: '600',
-    textAlign: 'center',
+    color: Colors.secondary,
+    fontWeight: '700',
   },
   summaryLabel: {
-    fontSize: 14,
-    color: Colors.onSecondaryMuted,
-    opacity: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   summaryAmount: {
     fontSize: 36,
-    fontWeight: 'bold',
-    color: Colors.onSecondary,
-    marginTop: 8,
+    fontWeight: '800',
+    color: Colors.white,
+    marginTop: 6,
+    letterSpacing: -0.8,
   },
   summaryCount: {
-    fontSize: 14,
-    color: Colors.onSecondaryMuted,
-    opacity: 1,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
     marginTop: 8,
+    fontWeight: '600',
   },
   balanceHint: {
     fontSize: 13,
-    color: Colors.onSecondaryMuted,
-    marginTop: 10,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 6,
+    fontWeight: '500',
   },
   reportLink: {
     alignSelf: 'flex-start',
@@ -578,15 +549,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   withdrawBtn: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 14,
+    backgroundColor: Colors.accent,
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: 'center',
+    ...shadow({ color: Colors.accent, offsetX: 0, offsetY: 6, blur: 14, opacity: 0.28, elevation: 6 }),
   },
   withdrawBtnText: {
     color: Colors.white,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   pendingBanner: {
     backgroundColor: Colors.surface,
@@ -653,28 +625,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontStyle: 'italic',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  modalSub: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 16,
-  },
   quickPctRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -698,20 +648,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textLight,
     marginBottom: 10,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  modalRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
   },
   reflectLabel: {
     fontSize: 13,
@@ -744,30 +680,6 @@ const styles = StyleSheet.create({
   },
   reflectOptionTextActive: {
     color: Colors.primary,
-  },
-  modalCancel: {
-    flex: 1,
-    padding: 14,
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: Colors.background,
-  },
-  modalCancelText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  modalOk: {
-    flex: 1,
-    padding: 14,
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-  },
-  modalOkText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.white,
   },
   paymentTypeTag: {
     fontSize: 10,

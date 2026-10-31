@@ -3,9 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   TextInput,
-  ScrollView,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +14,7 @@ import {
   countryLabel,
   defaultCurrencyForCountry,
 } from '../constants/spanishLocales';
+import AppModal, { modalFieldStyles } from './AppModal';
 
 export type FamilyLocaleSectionProps = {
   countryCode: string;
@@ -47,11 +46,15 @@ export function FamilyLocaleSection({
     );
   }, [countrySearch]);
 
+  const closeCountryModal = () => {
+    setCountryModalVisible(false);
+    setCountrySearch('');
+  };
+
   const pickCountry = (code: string) => {
     onCountryChange(code);
     onCurrencyChange(defaultCurrencyForCountry(code));
-    setCountryModalVisible(false);
-    setCountrySearch('');
+    closeCountryModal();
   };
 
   return (
@@ -89,50 +92,33 @@ export function FamilyLocaleSection({
         </View>
       </View>
 
-      <Modal
+      <AppModal
         visible={countryModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => {
-          setCountryModalVisible(false);
-          setCountrySearch('');
-        }}
+        onClose={closeCountryModal}
+        title="País o región"
+        icon="globe-outline"
+        variant="card"
+        size="lg"
       >
-        <View style={s.modalOverlay}>
-          <View style={s.modalBox}>
-            <Text style={s.modalTitle}>País o región</Text>
-            <TextInput
-              style={s.searchInput}
-              placeholder="Buscar país…"
-              placeholderTextColor={Colors.textLight}
-              value={countrySearch}
-              onChangeText={setCountrySearch}
-              autoCorrect={false}
-            />
-            <ScrollView style={s.countryList} keyboardShouldPersistTaps="handled">
-              {filteredCountries.map((c) => (
-                <TouchableOpacity
-                  key={c.code}
-                  style={[s.countryRow, countryCode === c.code && s.countryRowActive]}
-                  onPress={() => pickCountry(c.code)}
-                >
-                  <Text style={s.countryRowText}>{c.name}</Text>
-                  <Text style={s.countryRowMeta}>{c.currency}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity
-              style={s.modalClose}
-              onPress={() => {
-                setCountryModalVisible(false);
-                setCountrySearch('');
-              }}
-            >
-              <Text style={s.modalCloseText}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Buscar país…"
+          placeholderTextColor={Colors.textLight}
+          value={countrySearch}
+          onChangeText={setCountrySearch}
+          autoCorrect={false}
+        />
+        {filteredCountries.map((c) => (
+          <TouchableOpacity
+            key={c.code}
+            style={[s.countryRow, countryCode === c.code && s.countryRowActive]}
+            onPress={() => pickCountry(c.code)}
+          >
+            <Text style={s.countryRowText}>{c.name}</Text>
+            <Text style={s.countryRowMeta}>{c.currency}</Text>
+          </TouchableOpacity>
+        ))}
+      </AppModal>
     </>
   );
 }
@@ -193,38 +179,6 @@ const s = StyleSheet.create({
   currencyChipTextActive: {
     color: Colors.white,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  searchInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: 12,
-  },
-  countryList: {
-    maxHeight: 320,
-  },
   countryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -247,15 +201,5 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: Colors.textSecondary,
     fontWeight: '600',
-  },
-  modalClose: {
-    marginTop: 12,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  modalCloseText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
   },
 });

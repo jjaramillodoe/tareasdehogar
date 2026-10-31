@@ -1,42 +1,57 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
 import { familyAPI } from '../../src/services/api';
-import { Colors } from '../../src/constants/colors';
-import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
+import { getChildAvatarSource } from '../../src/utils/avatars';
+import { useGoBack } from '../../src/utils/navigation';
+import AuthShell from '../../src/components/ui/AuthShell';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import Chip from '../../src/components/ui/Chip';
+import ChoiceRow from '../../src/components/ui/ChoiceRow';
+import IconTile from '../../src/components/ui/IconTile';
+import Notice from '../../src/components/ui/Notice';
+import TextField from '../../src/components/ui/TextField';
+import { Colors, Radius, Spacing, Type } from '../../src/theme';
+
+type ChildOption = { name: string; alias?: string | null; gender?: 'mujer' | 'hombre' | null };
 
 export default function ChildLoginScreen() {
   const router = useRouter();
+  const exit = useGoBack();
   const { childLogin, isLoading } = useAuthStore();
   const [step, setStep] = useState<1 | 2>(1);
   const [familyCode, setFamilyCode] = useState('');
   const [familyName, setFamilyName] = useState('');
   const [currency, setCurrency] = useState('');
-  const [childrenList, setChildrenList] = useState<{ name: string; alias?: string | null }[]>([]);
+  const [childrenList, setChildrenList] = useState<ChildOption[]>([]);
   const [selectedName, setSelectedName] = useState('');
   const [pin, setPin] = useState('');
   const [lockoutMessage, setLockoutMessage] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  const goBack = () => {
+    if (step === 2) {
+      setStep(1);
+      setPin('');
+      setSelectedName('');
+      setLockoutMessage(null);
+      setPinError(null);
+      return;
+    }
+    exit();
+  };
 
   const handleLookup = async () => {
     const code = familyCode.trim().toUpperCase();
     if (code.length < 4) {
-      Alert.alert('Código', 'Ingresa el código de familia que te dio tu padre o madre.');
+      setCodeError('Ingresa el código que te dio tu familia.');
       return;
     }
+    setCodeError(null);
     setLookupLoading(true);
     try {
       const data = await familyAPI.getPublicByChildCode(code);
@@ -45,14 +60,13 @@ export default function ChildLoginScreen() {
       setChildrenList(data.children || []);
       setLockoutMessage(null);
       if (!data.children?.length) {
-        Alert.alert('Sin hijos', 'Esta familia aún no tiene perfiles de hijos.');
-        setLookupLoading(false);
+        Alert.alert('Sin perfiles', 'Esta familia aún no tiene hijos para entrar.');
         return;
       }
       setStep(2);
     } catch (e: any) {
       const msg = e.response?.data?.detail || 'Código no encontrado';
-      Alert.alert('Error', msg);
+      setCodeError(msg);
     } finally {
       setLookupLoading(false);
     }
@@ -60,13 +74,18 @@ export default function ChildLoginScreen() {
 
   const submitLogin = async () => {
     if (!selectedName.trim()) {
-      Alert.alert('Nombre', 'Elige tu nombre en la lista.');
+      setPinError('Elige tu nombre en la lista.');
       return;
     }
+    if (pin.trim().length < 4) {
+      setPinError('Ingresa tu PIN de al menos 4 dígitos.');
+      return;
+    }
+    setPinError(null);
     try {
-      await childLogin(familyCode, selectedName, pin.trim() || undefined);
+      await childLogin(familyCode, selectedName, pin.trim());
       setLockoutMessage(null);
-      router.replace('/(child)/tasks');
+      router.replace('/(child)/home');
     } catch (e: any) {
       const msg = e.response?.data?.detail || 'No se pudo entrar';
       const status = Number(e?.response?.status || 0);
@@ -78,231 +97,172 @@ export default function ChildLoginScreen() {
         );
       } else {
         setLockoutMessage(null);
-        Alert.alert('Error', msg);
+        setPinError(msg);
       }
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <AuthShell
+      title={step === 1 ? 'Entrar como hijo' : 'Elige tu perfil'}
+      subtitle={step === 1 ? 'Usa el código de tu familia' : 'Toca tu nombre y escribe tu PIN'}
+      onBack={goBack}
+      step={{ current: step, total: 2 }}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <FlagStripe height={4} style={styles.flagStripe} />
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-
-        <Text style={styles.title}>Entrar como hijo o hija</Text>
-        <Text style={styles.subtitle}>
-          Tu padre o madre te comparte el código de familia. Si pusieron un PIN en tu perfil,
-          también lo necesitas.
-        </Text>
-
-        {step === 1 && (
-          <>
-            <Text style={styles.label}>Código de familia</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ej: A1B2C3"
-              placeholderTextColor={Colors.textLight}
-              value={familyCode}
-              onChangeText={(t) => setFamilyCode(t.toUpperCase())}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-            <TouchableOpacity
-              style={[styles.primaryBtn, (lookupLoading || isLoading) && styles.btnDisabled]}
-              onPress={handleLookup}
-              disabled={lookupLoading || isLoading}
-            >
-              {lookupLoading ? (
-                <ActivityIndicator color={Colors.white} />
-              ) : (
-                <Text style={styles.primaryBtnText}>Continuar</Text>
-              )}
-            </TouchableOpacity>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <View style={styles.familyBanner}>
-              <Text style={styles.familyBannerName}>{familyName}</Text>
-              <Text style={styles.familyBannerCur}>{currency}</Text>
+      {step === 1 ? (
+        <Card style={styles.card}>
+          <Chip label="Hijo o hija" icon="happy" tone="secondary" />
+          <Text style={Type.body}>
+            Tu padre o madre te comparte el código. Luego eliges tu nombre e ingresas tu PIN.
+          </Text>
+          <TextField
+            label="Código de familia"
+            icon="key-outline"
+            placeholder="Ej. A1B2C3"
+            value={familyCode}
+            onChangeText={(t) => {
+              setFamilyCode(t.toUpperCase());
+              if (codeError) setCodeError(null);
+            }}
+            error={codeError}
+            code
+            autoCapitalize="characters"
+            autoCorrect={false}
+            autoComplete="off"
+            returnKeyType="go"
+            onSubmitEditing={handleLookup}
+          />
+        </Card>
+      ) : (
+        <>
+          <View style={styles.familyBanner}>
+            <IconTile icon="home" tone="secondary" size={44} />
+            <View style={styles.familyBannerBody}>
+              <Text style={Type.heading} numberOfLines={1}>
+                {familyName}
+              </Text>
+              <Text style={Type.caption}>{currency}</Text>
             </View>
-            <Text style={styles.label}>¿Cuál eres tú?</Text>
-            {childrenList.map((c, idx) => (
-              <TouchableOpacity
-                key={`${c.name}-${idx}`}
-                style={[
-                  styles.nameChip,
-                  selectedName === c.name && styles.nameChipActive,
-                ]}
-                onPress={() => {
-                  setSelectedName(c.name);
-                  setLockoutMessage(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.nameChipText,
-                    selectedName === c.name && styles.nameChipTextActive,
-                  ]}
-                >
-                  {c.name}
-                  {c.alias && c.alias !== c.name ? ` (${c.alias})` : ''}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          </View>
 
-            <Text style={styles.label}>PIN (si tu familia lo configuró)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Opcional"
-              placeholderTextColor={Colors.textLight}
+          <Card style={styles.card}>
+            <View style={styles.choices} accessibilityRole="radiogroup">
+              <Text style={styles.label}>¿Cuál eres tú?</Text>
+              {childrenList.map((c, idx) => (
+                <ChoiceRow
+                  key={`${c.name}-${idx}`}
+                  title={c.name}
+                  description={c.alias && c.alias !== c.name ? c.alias : undefined}
+                  selected={selectedName === c.name}
+                  leading={<Image source={getChildAvatarSource(c.gender)} style={styles.avatar} />}
+                  onPress={() => {
+                    setSelectedName(c.name);
+                    setLockoutMessage(null);
+                    setPinError(null);
+                  }}
+                />
+              ))}
+            </View>
+
+            <TextField
+              label="Tu PIN"
+              icon="lock-closed-outline"
+              placeholder="Al menos 4 dígitos"
               value={pin}
               onChangeText={(value) => {
-                setPin(value);
+                setPin(value.replace(/[^\d]/g, ''));
                 if (lockoutMessage) setLockoutMessage(null);
+                if (pinError) setPinError(null);
               }}
+              error={pinError}
+              code
+              secureToggle
               keyboardType="number-pad"
-              maxLength={8}
-              secureTextEntry
+              maxLength={12}
+              returnKeyType="go"
+              onSubmitEditing={submitLogin}
             />
             {lockoutMessage ? (
-              <View style={styles.lockoutBox}>
-                <Ionicons name="lock-closed-outline" size={16} color={Colors.warning} />
-                <Text style={styles.lockoutText}>{lockoutMessage}</Text>
-              </View>
+              <Notice tone="warning" icon="lock-closed">
+                {lockoutMessage}
+              </Notice>
             ) : null}
+          </Card>
+        </>
+      )}
 
-            <TouchableOpacity
-              style={[styles.primaryBtn, isLoading && styles.btnDisabled]}
-              onPress={submitLogin}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color={Colors.white} />
-              ) : (
-                <Text style={styles.primaryBtnText}>Entrar</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.linkBack} onPress={() => setStep(1)}>
-              <Text style={styles.linkBackText}>Cambiar código</Text>
-            </TouchableOpacity>
-          </>
+      <View style={styles.actions}>
+        <Button
+          label={step === 1 ? 'Continuar' : 'Entrar'}
+          iconRight={step === 1 ? 'arrow-forward' : 'log-in-outline'}
+          variant="kid"
+          size="lg"
+          loading={lookupLoading || isLoading}
+          onPress={step === 1 ? handleLookup : submitLogin}
+        />
+        {step === 2 ? (
+          <Button label="Cambiar código" icon="key-outline" variant="ghost" onPress={goBack} />
+        ) : (
+          <Button label="Soy padre o tutor" variant="ghost" onPress={() => router.push('/(auth)/login')} />
         )}
+      </View>
 
-        <View style={styles.legalNote}>
-          <Text style={styles.legalNoteText}>
-            Si eres menor, usa esta entrada solo con permiso de tu tutor. Información:{' '}
-            <Text style={styles.legalLinkInline} onPress={() => router.push('/(public)/privacy-minors')}>
-              Privacidad y menores
-            </Text>
-            .
+      <View style={styles.legalNote}>
+        <Text style={[Type.caption, styles.center]}>
+          Si eres menor, usa esta entrada solo con permiso de tu tutor.{' '}
+          <Text style={styles.inlineLink} onPress={() => router.push('/(public)/privacy-minors')}>
+            Privacidad y menores
           </Text>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </Text>
+      </View>
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { padding: 24, paddingTop: 56, paddingBottom: 40 },
-  flagStripe: { marginHorizontal: -24, marginBottom: 16 },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
+  card: {
+    gap: Spacing.lg,
   },
-  title: { fontSize: 24, fontWeight: 'bold', color: Colors.text, marginBottom: 8 },
-  subtitle: { fontSize: 15, color: Colors.textSecondary, marginBottom: 24, lineHeight: 22 },
-  label: { fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 8 },
-  input: {
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 16,
-    fontSize: 16,
+  label: {
+    fontSize: 14,
+    fontWeight: '700',
     color: Colors.text,
-    marginBottom: 20,
+    marginBottom: Spacing.xs,
   },
-  primaryBtn: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
+  choices: {
+    gap: Spacing.sm + 2,
   },
-  btnDisabled: { opacity: 0.7 },
-  primaryBtnText: { color: Colors.white, fontSize: 17, fontWeight: '600' },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
   familyBanner: {
-    backgroundColor: Colors.primary + '18',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  familyBannerName: { fontSize: 18, fontWeight: '700', color: Colors.text },
-  familyBannerCur: { fontSize: 14, color: Colors.textSecondary, marginTop: 4 },
-  nameChip: {
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: 10,
-    backgroundColor: Colors.surface,
-  },
-  nameChipActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primary + '15',
-  },
-  nameChipText: { fontSize: 16, color: Colors.text },
-  nameChipTextActive: { fontWeight: '600', color: Colors.primary },
-  linkBack: { marginTop: 16, alignItems: 'center' },
-  linkBackText: { color: Colors.primary, fontSize: 15, fontWeight: '600' },
-  lockoutBox: {
-    marginTop: -8,
-    marginBottom: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.warningLight,
-    backgroundColor: `${Colors.warning}14`,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md + 2,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.secondarySoft,
   },
-  lockoutText: {
+  familyBannerBody: {
     flex: 1,
-    fontSize: 12,
-    color: Colors.warning,
-    lineHeight: 17,
-    fontWeight: '600',
+    minWidth: 0,
+  },
+  actions: {
+    gap: Spacing.xs,
   },
   legalNote: {
-    marginTop: 28,
-    paddingTop: 20,
+    paddingTop: Spacing.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderTopColor: Colors.borderDark,
   },
-  legalNoteText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 20,
+  center: {
+    textAlign: 'center',
   },
-  legalLinkInline: {
-    fontSize: 13,
+  inlineLink: {
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
     textDecorationLine: 'underline',
   },
 });

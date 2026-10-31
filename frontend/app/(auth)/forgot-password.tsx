@@ -1,35 +1,28 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Colors } from '../../src/constants/colors';
-import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
 import { authAPI } from '../../src/services/api';
+import { useGoBack } from '../../src/utils/navigation';
+import AuthShell from '../../src/components/ui/AuthShell';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import Chip from '../../src/components/ui/Chip';
+import IconTile from '../../src/components/ui/IconTile';
+import TextField from '../../src/components/ui/TextField';
+import { Spacing, Type } from '../../src/theme';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const goBack = useGoBack();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
   const [errors, setErrors] = useState<{ email?: string }>({});
 
   const validate = () => {
     const next: { email?: string } = {};
-    if (!email.trim()) {
-      next.email = 'El correo es requerido';
-    } else if (!/\S+@\S+\.\S+/.test(email.trim())) {
-      next.email = 'Ingresa un correo válido';
-    }
+    if (!email.trim()) next.email = 'El correo es requerido';
+    else if (!/\S+@\S+\.\S+/.test(email.trim())) next.email = 'Ingresa un correo válido';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -38,10 +31,8 @@ export default function ForgotPasswordScreen() {
     if (!validate()) return;
     setLoading(true);
     try {
-      const res = await authAPI.forgotPassword(email.trim());
-      Alert.alert('Listo', res.message, [
-        { text: 'OK', onPress: () => router.replace('/(auth)/login') },
-      ]);
+      await authAPI.forgotPassword(email.trim());
+      setSent(true);
     } catch (e: unknown) {
       const message =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
@@ -53,146 +44,98 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <AuthShell
+      title="Recuperar acceso"
+      subtitle={sent ? 'Revisa tu correo' : 'Te enviamos un enlace si el correo existe'}
+      onBack={goBack}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <FlagStripe height={4} style={styles.flagStripe} />
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-
-        <View style={styles.header}>
-          <Text style={styles.title}>¿Olvidaste tu contraseña?</Text>
-          <Text style={styles.subtitle}>
-            Te enviaremos un enlace para restablecerla si el correo está registrado.
+      {sent ? (
+        <Card style={styles.successCard}>
+          <IconTile icon="mail-open" size={60} />
+          <Text style={[Type.heading, styles.center]}>Instrucciones enviadas</Text>
+          <Text style={[Type.body, styles.center]}>
+            Si {email.trim()} está registrado, recibirás un enlace para crear una nueva contraseña.
+            Revisa también spam o promociones.
           </Text>
+        </Card>
+      ) : (
+        <Card style={styles.card}>
+          <Chip label="Padre o tutor" icon="lock-open-outline" />
+          <Text style={Type.body}>
+            Escribe el correo de tu cuenta. Si está registrado, te mandamos un enlace para
+            restablecer la contraseña.
+          </Text>
+          <TextField
+            label="Correo electrónico"
+            icon="mail-outline"
+            placeholder="tu@correo.com"
+            value={email}
+            onChangeText={(t) => {
+              setEmail(t);
+              if (errors.email) setErrors({});
+            }}
+            error={errors.email}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType="send"
+            onSubmitEditing={handleSubmit}
+          />
+        </Card>
+      )}
+
+      {sent ? (
+        <View style={styles.actions}>
+          <Button
+            label="Volver a iniciar sesión"
+            iconRight="arrow-forward"
+            size="lg"
+            onPress={() => router.replace('/(auth)/login')}
+          />
+          <Button
+            label="Usar otro correo"
+            variant="ghost"
+            onPress={() => {
+              setSent(false);
+              setEmail('');
+            }}
+          />
         </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Correo electrónico</Text>
-            <View style={[styles.inputWrapper, errors.email && styles.inputError]}>
-              <Ionicons name="mail-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="tu@correo.com"
-                placeholderTextColor={Colors.textLight}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
-          </View>
-
-          <TouchableOpacity
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+      ) : (
+        <View style={styles.actions}>
+          <Button
+            label="Enviar instrucciones"
+            iconRight="send"
+            size="lg"
+            loading={loading}
             onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.submitButtonText}>Enviar instrucciones</Text>
-            )}
-          </TouchableOpacity>
+          />
+          <Button
+            label="Recordé mi contraseña"
+            variant="ghost"
+            onPress={() => router.replace('/(auth)/login')}
+          />
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      )}
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
+  card: {
+    gap: Spacing.lg,
   },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 56,
-  },
-  flagStripe: {
-    marginHorizontal: -24,
-    marginBottom: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    justifyContent: 'center',
+  successCard: {
     alignItems: 'center',
-    marginBottom: 20,
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xxl,
   },
-  header: {
-    marginBottom: 32,
+  center: {
+    textAlign: 'center',
   },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    lineHeight: 22,
-  },
-  form: {
-    gap: 20,
-  },
-  inputContainer: {
-    gap: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 16,
-    height: 52,
-    gap: 12,
-  },
-  inputError: {
-    borderColor: Colors.error,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: Colors.text,
-  },
-  errorText: {
-    fontSize: 12,
-    color: Colors.error,
-  },
-  submitButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    color: Colors.white,
-    fontSize: 18,
-    fontWeight: '600',
+  actions: {
+    gap: Spacing.xs,
   },
 });

@@ -1,52 +1,37 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, TextInput, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../src/store/authStore';
-import { Colors } from '../../src/constants/colors';
-import { Ionicons } from '@expo/vector-icons';
-import FlagStripe from '../../src/components/FlagStripe';
+import { useGoBack } from '../../src/utils/navigation';
+import AuthShell from '../../src/components/ui/AuthShell';
+import Button from '../../src/components/ui/Button';
+import Card from '../../src/components/ui/Card';
+import Chip from '../../src/components/ui/Chip';
+import TextField from '../../src/components/ui/TextField';
+import { Colors, Spacing, Type } from '../../src/theme';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const goBack = useGoBack();
   const { login, isLoading } = useAuthStore();
+  const passwordRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
   const validateForm = () => {
-    const newErrors: { email?: string; password?: string } = {};
-
-    if (!email) {
-      newErrors.email = 'El correo es requerido';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Ingresa un correo válido';
-    }
-
-    if (!password) {
-      newErrors.password = 'La contraseña es requerida';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const next: { email?: string; password?: string } = {};
+    if (!email.trim()) next.email = 'El correo es requerido';
+    else if (!/\S+@\S+\.\S+/.test(email.trim())) next.email = 'Ingresa un correo válido';
+    if (!password) next.password = 'La contraseña es requerida';
+    setErrors(next);
+    return Object.keys(next).length === 0;
   };
 
   const handleLogin = async () => {
     if (!validateForm()) return;
-
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       router.replace('/(parent)/home');
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Error al iniciar sesión';
@@ -55,244 +40,128 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <FlagStripe height={4} style={styles.flagStripe} />
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
+    <AuthShell title="Iniciar sesión" subtitle="Entra a tu cuenta familiar" onBack={goBack}>
+      <Card style={styles.card}>
+        <Chip label="Padre o tutor" icon="shield-checkmark" />
+
+        <TextField
+          label="Correo electrónico"
+          icon="mail-outline"
+          placeholder="tu@correo.com"
+          value={email}
+          onChangeText={(t) => {
+            setEmail(t);
+            if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
+          }}
+          error={errors.email}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
+          returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+        />
+
+        <TextField
+          ref={passwordRef}
+          label="Contraseña"
+          icon="lock-closed-outline"
+          placeholder="Tu contraseña"
+          value={password}
+          onChangeText={(t) => {
+            setPassword(t);
+            if (errors.password) setErrors((e) => ({ ...e, password: undefined }));
+          }}
+          error={errors.password}
+          secureToggle
+          autoComplete="password"
+          textContentType="password"
+          returnKeyType="go"
+          onSubmitEditing={handleLogin}
+        />
+
+        <Text
+          style={styles.forgotLink}
+          onPress={() => router.push('/(auth)/forgot-password')}
+          accessibilityRole="link"
         >
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
+          ¿Olvidaste tu contraseña?
+        </Text>
+      </Card>
 
-        <View style={styles.header}>
-          <Text style={styles.title}>Iniciar Sesión</Text>
-          <Text style={styles.subtitle}>Ingresa a tu cuenta familiar</Text>
-        </View>
+      <Button
+        label="Iniciar sesión"
+        iconRight="arrow-forward"
+        size="lg"
+        loading={isLoading}
+        onPress={handleLogin}
+      />
 
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Correo Electrónico</Text>
-            <View style={[styles.inputWrapper, errors.email && styles.inputError]}>
-              <Ionicons name="mail-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="tu@correo.com"
-                placeholderTextColor={Colors.textLight}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
-          </View>
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>o</Text>
+        <View style={styles.dividerLine} />
+      </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Contraseña</Text>
-            <View style={[styles.inputWrapper, errors.password && styles.inputError]}>
-              <Ionicons name="lock-closed-outline" size={20} color={Colors.textSecondary} />
-              <TextInput
-                style={styles.input}
-                placeholder="Tu contraseña"
-                placeholderTextColor={Colors.textLight}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons
-                  name={showPassword ? 'eye-outline' : 'eye-off-outline'}
-                  size={20}
-                  color={Colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-          </View>
+      <View style={styles.childBlock}>
+        <Button
+          label="Soy hijo o hija"
+          icon="happy"
+          variant="kid"
+          onPress={() => router.push('/(auth)/child-login')}
+        />
+        <Text style={[Type.caption, styles.center]}>
+          Usa el código de familia que te dieron. No necesitas correo.
+        </Text>
+      </View>
 
-          <TouchableOpacity
-            style={styles.forgotLinkWrap}
-            onPress={() => router.push('/(auth)/forgot-password')}
-          >
-            <Text style={styles.forgotLink}>¿Olvidaste tu contraseña?</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.submitButtonText}>Iniciar Sesión</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.childEntryButton}
-            onPress={() => router.push('/(auth)/child-login')}
-          >
-            <Ionicons name="happy-outline" size={22} color={Colors.secondary} />
-            <Text style={styles.childEntryButtonText}>Soy hijo o hija</Text>
-          </TouchableOpacity>
-          <Text style={styles.childEntryHint}>
-            Usa el código de familia que te dieron (no necesitas correo)
-          </Text>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>¿No tienes cuenta?</Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
-              <Text style={styles.footerLink}>Regístrate</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <Text style={[Type.body, styles.center]}>
+        ¿No tienes cuenta?{' '}
+        <Text style={styles.inlineLink} onPress={() => router.push('/(auth)/register')}>
+          Regístrate
+        </Text>
+      </Text>
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 56,
-  },
-  flagStripe: {
-    marginHorizontal: -24,
-    marginBottom: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  header: {
-    marginBottom: 32,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-  },
-  form: {
-    gap: 20,
-  },
-  forgotLinkWrap: {
-    alignSelf: 'flex-end',
-    marginTop: -8,
+  card: {
+    gap: Spacing.lg,
   },
   forgotLink: {
+    alignSelf: 'flex-end',
     fontSize: 14,
+    fontWeight: '700',
     color: Colors.primary,
-    fontWeight: '600',
+    paddingVertical: Spacing.xs,
+    marginTop: -Spacing.xs,
   },
-  inputContainer: {
-    gap: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  inputWrapper: {
+  dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 16,
-    height: 52,
-    gap: 12,
+    gap: Spacing.md,
   },
-  inputError: {
-    borderColor: Colors.error,
-  },
-  input: {
+  dividerLine: {
     flex: 1,
-    fontSize: 16,
-    color: Colors.text,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.borderDark,
   },
-  errorText: {
-    fontSize: 12,
-    color: Colors.error,
-  },
-  submitButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    color: Colors.white,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  childEntryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: Colors.secondary,
-    backgroundColor: Colors.surface,
-    marginTop: 8,
-  },
-  childEntryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.secondary,
-  },
-  childEntryHint: {
+  dividerText: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    fontWeight: '700',
+    color: Colors.textLight,
+  },
+  childBlock: {
+    gap: Spacing.sm,
+  },
+  center: {
     textAlign: 'center',
-    marginTop: 8,
-    paddingHorizontal: 8,
   },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 16,
-  },
-  footerText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  footerLink: {
-    fontSize: 14,
+  inlineLink: {
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

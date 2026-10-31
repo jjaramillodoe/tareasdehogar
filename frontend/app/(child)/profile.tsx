@@ -5,9 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  ScrollView,
   ActivityIndicator,
-  Modal,
   TextInput,
   Alert,
 } from 'react-native';
@@ -16,6 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { Colors } from '../../src/constants/colors';
 import { authAPI, paymentsAPI, savingsGoalsAPI, statsAPI } from '../../src/services/api';
+import AppModal, { AppModalActions, modalFieldStyles } from '../../src/components/AppModal';
+import ChildScreenShell, { ChildEmptyState } from '../../src/components/ChildScreenShell';
+import { shadow } from '../../src/utils/shadow';
+import { getChildAvatarSource } from '../../src/utils/avatars';
 
 type SavingsGoal = {
   id: string;
@@ -81,9 +83,20 @@ export default function ChildProfileScreen() {
     }, [loadSavingsData])
   );
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace('/');
+  const handleLogout = () => {
+    Alert.alert('Cerrar sesión', '¿Quieres salir de tu cuenta?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Salir',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await logout();
+            router.replace('/');
+          })();
+        },
+      },
+    ]);
   };
 
   const submitPinChange = async () => {
@@ -115,10 +128,7 @@ export default function ChildProfileScreen() {
     }
   };
 
-  const avatarSource =
-    selectedChild?.gender === 'mujer'
-      ? require('../../assets/images/mujer.png')
-      : require('../../assets/images/hombre.png');
+  const avatarSource = getChildAvatarSource(selectedChild?.gender);
 
   const activeGoal = useMemo(
     () => goals.find((g) => !g.is_completed && g.saved_amount < g.target_amount),
@@ -162,15 +172,25 @@ export default function ChildProfileScreen() {
     };
   }, [payments]);
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Perfil</Text>
-        <Text style={styles.headerSubtitle}>Tu información</Text>
-      </View>
+  if (!selectedChild) {
+    return (
+      <ChildScreenShell title="Perfil" showBack>
+        <ChildEmptyState icon="person-outline" title="No hay sesión activa" />
+      </ChildScreenShell>
+    );
+  }
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {selectedChild ? (
+  const displayName = selectedChild.alias || selectedChild.name;
+  const currency = family?.currency || 'USD';
+
+  return (
+    <>
+    <ChildScreenShell
+      title="Perfil"
+      subtitle={`Hola, ${displayName}`}
+      showBack
+      accent="yellow"
+    >
           <View style={styles.card}>
             <View style={styles.avatarWrap}>
               <Image source={avatarSource} style={styles.avatar} />
@@ -182,15 +202,20 @@ export default function ChildProfileScreen() {
 
             {selectedChild.alias ? <Text style={styles.alias}>Alias: {selectedChild.alias}</Text> : null}
 
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Saldo actual</Text>
-              <Text style={styles.infoValue}>
-                {family?.currency} {selectedChild.balance.toFixed(2)}
+            <View style={styles.balanceHero}>
+              <Text style={styles.balanceHeroLabel}>Saldo actual</Text>
+              <Text style={styles.balanceHeroValue}>
+                {currency} {selectedChild.balance.toFixed(2)}
               </Text>
-              <Text style={styles.infoSubValue}>
-                Disponible ahora: {family?.currency}{' '}
-                {(availableBalance ?? selectedChild.balance).toFixed(2)} · en espera 24h:{' '}
-                {family?.currency} {cooldownLocked.toFixed(2)}
+              <View style={styles.streakPill}>
+                <Ionicons name="flame" size={14} color={Colors.secondaryInk} />
+                <Text style={styles.streakPillText}>
+                  Racha {savingsStreak} · mejor {bestSavingsStreak}
+                </Text>
+              </View>
+              <Text style={styles.balanceHeroSub}>
+                Disponible: {currency} {(availableBalance ?? selectedChild.balance).toFixed(2)} · espera 24h:{' '}
+                {currency} {cooldownLocked.toFixed(2)}
               </Text>
             </View>
 
@@ -302,11 +327,6 @@ export default function ChildProfileScreen() {
               </Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.emptyText}>No hay perfil de hijo activo.</Text>
-          </View>
-        )}
 
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={20} color={Colors.error} />
@@ -319,59 +339,60 @@ export default function ChildProfileScreen() {
           <Ionicons name="key-outline" size={20} color={Colors.primary} />
           <Text style={[styles.logoutText, { color: Colors.primary }]}>Cambiar mi PIN</Text>
         </TouchableOpacity>
-      </ScrollView>
+    </ChildScreenShell>
 
-      <Modal visible={!!pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Cambiar mi PIN</Text>
-            <Text style={styles.modalHint}>Si ya tenías PIN, ingresa tu PIN actual.</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="PIN actual (si aplica)"
-              placeholderTextColor={Colors.textLight}
-              value={pinModal?.currentPin ?? ''}
-              onChangeText={(currentPin) => pinModal && setPinModal({ ...pinModal, currentPin })}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={12}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Nuevo PIN"
-              placeholderTextColor={Colors.textLight}
-              value={pinModal?.newPin ?? ''}
-              onChangeText={(newPin) => pinModal && setPinModal({ ...pinModal, newPin })}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={12}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Confirmar PIN"
-              placeholderTextColor={Colors.textLight}
-              value={pinModal?.confirmPin ?? ''}
-              onChangeText={(confirmPin) => pinModal && setPinModal({ ...pinModal, confirmPin })}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={12}
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setPinModal(null)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={submitPinChange} disabled={savingPin}>
-                {savingPin ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.modalSaveText}>Guardar</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <AppModal
+        visible={!!pinModal}
+        onClose={() => setPinModal(null)}
+        title="Cambiar mi PIN"
+        subtitle="Si ya tenías PIN, ingresa tu PIN actual."
+        icon="key-outline"
+        iconTone="primary"
+        variant="sheet"
+        footer={
+          <AppModalActions
+            onCancel={() => setPinModal(null)}
+            confirmLabel="Guardar"
+            onConfirm={submitPinChange}
+            confirming={savingPin}
+          />
+        }
+      >
+        <Text style={modalFieldStyles.label}>PIN actual (si aplica)</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="PIN actual (si aplica)"
+          placeholderTextColor={Colors.textLight}
+          value={pinModal?.currentPin ?? ''}
+          onChangeText={(currentPin) => pinModal && setPinModal({ ...pinModal, currentPin })}
+          keyboardType="number-pad"
+          secureTextEntry
+          maxLength={12}
+        />
+        <Text style={modalFieldStyles.label}>Nuevo PIN</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Nuevo PIN"
+          placeholderTextColor={Colors.textLight}
+          value={pinModal?.newPin ?? ''}
+          onChangeText={(newPin) => pinModal && setPinModal({ ...pinModal, newPin })}
+          keyboardType="number-pad"
+          secureTextEntry
+          maxLength={12}
+        />
+        <Text style={modalFieldStyles.label}>Confirmar PIN</Text>
+        <TextInput
+          style={modalFieldStyles.input}
+          placeholder="Confirmar PIN"
+          placeholderTextColor={Colors.textLight}
+          value={pinModal?.confirmPin ?? ''}
+          onChangeText={(confirmPin) => pinModal && setPinModal({ ...pinModal, confirmPin })}
+          keyboardType="number-pad"
+          secureTextEntry
+          maxLength={12}
+        />
+      </AppModal>
+    </>
   );
 }
 
@@ -405,9 +426,12 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 20,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 3, blur: 10, opacity: 0.08, elevation: 3 }),
   },
   avatarWrap: {
     width: 120,
@@ -425,7 +449,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.text,
   },
   meta: {
@@ -437,29 +461,50 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 14,
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  infoRow: {
+  balanceHero: {
     marginTop: 18,
     width: '100%',
-    backgroundColor: Colors.backgroundAlt,
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: Colors.primary,
+    borderRadius: 18,
+    padding: 16,
+    ...shadow({ color: Colors.primary, offsetX: 0, offsetY: 6, blur: 14, opacity: 0.24, elevation: 6 }),
   },
-  infoLabel: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-  },
-  infoValue: {
-    marginTop: 4,
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.onSecondary,
-  },
-  infoSubValue: {
-    marginTop: 6,
+  balanceHeroLabel: {
     fontSize: 12,
-    color: Colors.textSecondary,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  balanceHeroValue: {
+    marginTop: 4,
+    fontSize: 28,
+    fontWeight: '800',
+    color: Colors.white,
+    letterSpacing: -0.5,
+  },
+  streakPill: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.secondary,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  streakPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.secondaryInk,
+  },
+  balanceHeroSub: {
+    marginTop: 10,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.85)',
     lineHeight: 18,
   },
   autoSaveCard: {
@@ -629,66 +674,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.error,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  modalHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: Colors.text,
-    marginBottom: 10,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 2,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  modalCancelText: {
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  modalSaveBtn: {
-    flex: 1,
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  modalSaveText: {
-    color: Colors.white,
-    fontWeight: '700',
   },
 });

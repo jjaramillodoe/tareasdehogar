@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/colors';
 import { notificationsAPI } from '../../src/services/api';
 
+
 function tabIcon(
   focused: boolean,
   outline: React.ComponentProps<typeof Ionicons>['name'],
@@ -13,7 +14,7 @@ function tabIcon(
   return (
     <Ionicons
       name={focused ? solid : outline}
-      size={focused ? 26 : 24}
+      size={24}
       color={focused ? Colors.primary : Colors.textSecondary}
     />
   );
@@ -45,23 +46,15 @@ export default function ParentLayout() {
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: {
           backgroundColor: Colors.surface,
-          borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 88 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-          paddingTop: 10,
-          shadowColor: Colors.primaryDark,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.08,
-          shadowRadius: 12,
-          elevation: 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: Colors.borderDark,
+          height: Platform.OS === 'ios' ? 86 : 66,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          paddingTop: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '700',
-          letterSpacing: 0.2,
-        },
-        tabBarItemStyle: {
-          paddingTop: 4,
         },
       }}
     >
@@ -74,14 +67,6 @@ export default function ParentLayout() {
         }}
       />
       <Tabs.Screen
-        name="children"
-        options={{
-          title: 'Hijos',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'people-outline', 'people'),
-        }}
-      />
-      <Tabs.Screen
         name="chores"
         options={{
           title: 'Tareas',
@@ -90,38 +75,22 @@ export default function ParentLayout() {
         }}
       />
       <Tabs.Screen
-        name="calendar"
+        name="children"
         options={{
-          title: 'Calendario',
+          title: 'Hijos',
           tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'calendar-outline', 'calendar'),
+            tabIcon(focused, 'people-outline', 'people'),
         }}
       />
       <Tabs.Screen
-        name="goals"
+        name="more"
         options={{
-          title: 'Metas',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'trophy-outline', 'trophy'),
-        }}
-      />
-      <Tabs.Screen
-        name="reports"
-        options={{
-          title: 'Reportes',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'stats-chart-outline', 'stats-chart'),
-        }}
-      />
-      <Tabs.Screen
-        name="notifications"
-        options={{
-          title: 'Alertas',
+          title: 'Más',
           tabBarIcon: ({ focused }) => (
             <View>
               <Ionicons
-                name={focused ? 'notifications' : 'notifications-outline'}
-                size={focused ? 26 : 24}
+                name={focused ? 'menu' : 'menu-outline'}
+                size={24}
                 color={focused ? Colors.primary : Colors.textSecondary}
               />
               {unreadCount > 0 && (
@@ -135,20 +104,12 @@ export default function ParentLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Perfil',
-          tabBarIcon: ({ focused }) =>
-            tabIcon(focused, 'person-circle-outline', 'person-circle'),
-        }}
-      />
-      <Tabs.Screen
-        name="family-badges"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="calendar" options={{ href: null }} />
+      <Tabs.Screen name="goals" options={{ href: null }} />
+      <Tabs.Screen name="reports" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="profile" options={{ href: null }} />
+      <Tabs.Screen name="family-badges" options={{ href: null }} />
     </Tabs>
   );
 }
