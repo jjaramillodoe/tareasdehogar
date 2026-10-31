@@ -248,19 +248,44 @@ async def check_and_award_achievements(child_id: str, family_id: str):
         ("first_task", 1),
         ("tasks_5", 5),
         ("tasks_10", 10),
+        ("tasks_15", 15),
         ("tasks_25", 25),
+        ("tasks_40", 40),
         ("tasks_50", 50),
+        ("tasks_75", 75),
+        ("tasks_100", 100),
     ]
 
     for achievement_type, required in task_milestones:
         if task_count >= required and achievement_type not in existing_types:
             await award_achievement(child_id, family_id, achievement_type)
 
-    streak = child.get("current_streak", 0)
+    # Distinct calendar days with approved tasks ("Buen Comienzo")
+    distinct_days = await db.chores.aggregate(
+        [
+            {"$match": {"completed_by": child_id, "status": "aprobada", "completed_at": {"$ne": None}}},
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {"format": "%Y-%m-%d", "date": "$completed_at"},
+                    }
+                }
+            },
+            {"$count": "n"},
+        ]
+    ).to_list(1)
+    day_count = distinct_days[0]["n"] if distinct_days else 0
+    if day_count >= 5 and "first_5_days" not in existing_types:
+        await award_achievement(child_id, family_id, "first_5_days")
+
+    # Use best streak so historical demo/backfill still unlocks badges
+    streak = max(int(child.get("current_streak") or 0), int(child.get("best_streak") or 0))
     streak_milestones = [
         ("streak_3", 3),
+        ("streak_5", 5),
         ("streak_7", 7),
         ("streak_14", 14),
+        ("streak_21", 21),
         ("streak_30", 30),
     ]
 
@@ -276,11 +301,37 @@ async def check_and_award_achievements(child_id: str, family_id: str):
     ).to_list(1)
 
     total = total_earned[0]["total"] if total_earned else 0
-    earning_milestones = [("earned_100", 100), ("earned_500", 500)]
+    earning_milestones = [
+        ("earned_100", 100),
+        ("earned_250", 250),
+        ("earned_500", 500),
+        ("earned_1000", 1000),
+    ]
 
     for achievement_type, required in earning_milestones:
         if total >= required and achievement_type not in existing_types:
             await award_achievement(child_id, family_id, achievement_type)
+
+    completed_goals = await db.goals.count_documents(
+        {"child_id": child_id, "family_id": family_id, "is_completed": True}
+    )
+    goal_milestones = [
+        ("goal_completed", 1),
+        ("goals_3", 3),
+        ("goals_5", 5),
+    ]
+    for achievement_type, required in goal_milestones:
+        if completed_goals >= required and achievement_type not in existing_types:
+            await award_achievement(child_id, family_id, achievement_type)
+
+    savings_streak = max(
+        int(child.get("savings_current_streak") or 0),
+        int(child.get("savings_best_streak") or 0),
+    )
+    if savings_streak >= 4 and "savings_streak_4w" not in existing_types:
+        await award_achievement(child_id, family_id, "savings_streak_4w")
+    if savings_streak >= 8 and "savings_streak_8w" not in existing_types:
+        await award_achievement(child_id, family_id, "savings_streak_8w")
 
 
 async def award_achievement(child_id: str, family_id: str, achievement_type: str):
@@ -298,6 +349,7 @@ async def award_achievement(child_id: str, family_id: str, achievement_type: str
         "description": definition["description"],
         "icon": definition["icon"],
         "child_id": child_id,
+        "family_id": family_id,
         "earned_at": datetime.utcnow(),
     }
     await db.achievements.insert_one(achievement)

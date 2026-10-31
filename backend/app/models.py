@@ -4,12 +4,20 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
+ParentGender = Literal["mujer", "hombre"]
+
+
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
     name: str
     invite_code: Optional[str] = None
     device_name: Optional[str] = None
+    gender: Optional[ParentGender] = None
+
+
+class UserProfileUpdate(BaseModel):
+    gender: Optional[ParentGender] = None
 
 
 class UserLogin(BaseModel):
@@ -20,7 +28,7 @@ class UserLogin(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=4, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -29,7 +37,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=10, max_length=512)
-    new_password: str = Field(..., min_length=4, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class GenericStatusMessage(BaseModel):
@@ -43,6 +51,7 @@ class UserResponse(BaseModel):
     role: str
     family_id: Optional[str] = None
     family_role: Optional[str] = None  # owner | parent | admin
+    gender: Optional[ParentGender] = None  # mujer → mother avatar, hombre → father
     created_at: datetime
 
 
@@ -142,7 +151,7 @@ class ChildCreate(BaseModel):
     name: str
     age: int
     alias: Optional[str] = None
-    pin: Optional[str] = None
+    pin: str = Field(..., min_length=4, max_length=12)
     gender: Optional[ChildGender] = None
 
 
@@ -170,7 +179,7 @@ class ChildFamilyBrief(BaseModel):
 class ChildStandaloneLogin(BaseModel):
     family_code: str = Field(..., min_length=4, max_length=12)
     child_name: str = Field(..., min_length=1, max_length=80)
-    pin: Optional[str] = Field(None, max_length=12)
+    pin: str = Field(..., min_length=4, max_length=12)
     device_name: Optional[str] = Field(None, max_length=120)
 
 
@@ -278,6 +287,21 @@ class ChoreApprove(BaseModel):
     )
 
 
+class ChoreBulkApprove(BaseModel):
+    """Aprueba varias tareas completadas usando el ahorro por defecto de cada hijo."""
+
+    chore_ids: Optional[List[str]] = Field(
+        None,
+        description="IDs a aprobar; si se omite, aprueba todas las tareas en estado completada",
+    )
+    max_amount: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Opcional: solo tareas con monto base <= max_amount",
+    )
+    rating: Optional[int] = Field(5, ge=1, le=5)
+
+
 class PaymentResponse(BaseModel):
     id: str
     child_id: str
@@ -374,6 +398,13 @@ class SavingsGoalCreate(BaseModel):
     child_id: str
 
 
+class SavingsGoalPropose(BaseModel):
+    """Propuesta de meta creada por un hijo (requiere aprobación del padre)."""
+    title: str = Field(..., min_length=1, max_length=120)
+    note: Optional[str] = Field(default=None, max_length=500)
+    target_amount: float = Field(..., gt=0)
+
+
 class SavingsGoalResponse(BaseModel):
     id: str
     title: str
@@ -384,6 +415,8 @@ class SavingsGoalResponse(BaseModel):
     family_id: str
     created_at: datetime
     is_completed: bool
+    status: str = "active"  # active | pending | rejected
+    proposed_by_child: bool = False
     milestones_reached: List[int] = []
     last_milestone_reached: Optional[int] = None
 

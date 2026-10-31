@@ -13,6 +13,7 @@ from app.deps import (
     get_current_user,
     get_current_user_or_child,
     hash_password,
+    password_needs_rehash,
     verify_password,
 )
 from app.models import (
@@ -28,8 +29,10 @@ from app.models import (
     TokenResponse,
     UserCreate,
     UserLogin,
+    UserProfileUpdate,
     UserResponse,
 )
+from app.rate_limit import client_ip, enforce_rate_limit
 from app.services.audit import log_audit_event
 from app.services.password_reset_email import send_password_reset_email
 
@@ -46,8 +49,25 @@ def _normalize_device_name(raw: str | None, fallback: str | None = None) -> str:
     return base[:120]
 
 
+def _user_response(user: dict) -> UserResponse:
+    gender = user.get("gender")
+    if gender not in ("mujer", "hombre"):
+        gender = None
+    return UserResponse(
+        id=user["id"],
+        email=user["email"],
+        name=user["name"],
+        role=user["role"],
+        family_id=user.get("family_id"),
+        family_role=user.get("family_role"),
+        gender=gender,
+        created_at=user["created_at"],
+    )
+
+
 @router.post("/register", response_model=TokenResponse)
 async def register_user(user_data: UserCreate, request: Request):
+    enforce_rate_limit(f"register:{client_ip(request)}", limit=10, window_sec=3600)
     """Registrar un nuevo padre/tutor. Opcional: invite_code para unirse a una familia."""
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
@@ -62,6 +82,7 @@ async def register_user(user_data: UserCreate, request: Request):
         "role": "padre",
         "family_id": None,
         "family_role": None,
+        "gender": user_data.gender,
         "token_version": 0,
         "created_at": datetime.utcnow(),
     }
@@ -101,24 +122,18 @@ async def register_user(user_data: UserCreate, request: Request):
 
     return TokenResponse(
         access_token=access_token,
-        user=UserResponse(
-            id=user_id,
-            email=user_data.email,
-            name=user_data.name,
-            role="padre",
-            family_id=user.get("family_id"),
-            family_role=user.get("family_role"),
-            created_at=user["created_at"],
-        ),
+        user=_user_response(user),
     )
 
 
 @router.post("/forgot-password", response_model=GenericStatusMessage)
-async def forgot_password(data: ForgotPasswordRequest):
+async def forgot_password(data: ForgotPasswordRequest, request: Request):
     """
     Solicita restablecimiento de contraseña. Siempre responde el mismo mensaje
     para no revelar si el correo existe.
     """
+    enforce_rate_limit(f"forgot:{client_ip(request)}", limit=8, window_sec=3600)
+    enforce_rate_limit(f"forgot-email:{(data.email or '').strip().lower()}", limit=5, window_sec=3600)
     msg_ok = GenericStatusMessage(
         message="Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña."
     )
@@ -150,7 +165,7 @@ async def forgot_password(data: ForgotPasswordRequest):
             reset_token=raw_token,
         )
     except Exception as e:
-        logger.exception("password reset email webhook failed: %s", e)
+        logger.exception("password reset email failed: %s", e)
 
     await log_audit_event(
         family_id=user.get("family_id"),
@@ -163,8 +178,9 @@ async def forgot_password(data: ForgotPasswordRequest):
 
 
 @router.post("/reset-password", response_model=GenericStatusMessage)
-async def reset_password(data: ResetPasswordRequest):
+async def reset_password(data: ResetPasswordRequest, request: Request):
     """Restablece la contraseña con el token recibido por correo."""
+    enforce_rate_limit(f"reset:{client_ip(request)}", limit=15, window_sec=3600)
     raw = data.token.strip()
     token_hash = _hash_password_reset_token(raw)
     row = await db.password_reset_tokens.find_one({"token_hash": token_hash})
@@ -209,9 +225,20 @@ async def reset_password(data: ResetPasswordRequest):
 @router.post("/login", response_model=TokenResponse)
 async def login_user(login_data: UserLogin, request: Request):
     """Iniciar sesión de padre/tutor"""
+    ip = client_ip(request)
+    enforce_rate_limit(f"login:{ip}", limit=30, window_sec=900)
+    enforce_rate_limit(f"login-email:{(login_data.email or '').strip().lower()}", limit=15, window_sec=900)
+
     user = await db.users.find_one({"email": login_data.email})
     if not user or not verify_password(login_data.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+
+    # Upgrade legacy SHA-256 hashes to bcrypt after successful login
+    if password_needs_rehash(user.get("password_hash") or ""):
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"password_hash": hash_password(login_data.password)}},
+        )
 
     session_id = str(uuid.uuid4())
     await db.auth_sessions.insert_one(
@@ -232,35 +259,37 @@ async def login_user(login_data: UserLogin, request: Request):
 
     return TokenResponse(
         access_token=access_token,
-        user=UserResponse(
-            id=user["id"],
-            email=user["email"],
-            name=user["name"],
-            role=user["role"],
-            family_id=user.get("family_id"),
-            family_role=user.get("family_role"),
-            created_at=user["created_at"],
-        ),
+        user=_user_response(user),
     )
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Obtener información del usuario actual"""
-    return UserResponse(
-        id=current_user["id"],
-        email=current_user["email"],
-        name=current_user["name"],
-        role=current_user["role"],
-        family_id=current_user.get("family_id"),
-        family_role=current_user.get("family_role"),
-        created_at=current_user["created_at"],
-    )
+    return _user_response(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    data: UserProfileUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Actualizar perfil del padre/tutor (p. ej. género para avatar)."""
+    patch: dict = {}
+    if data.gender is not None:
+        patch["gender"] = data.gender
+    if not patch:
+        return _user_response(current_user)
+    await db.users.update_one({"id": current_user["id"]}, {"$set": patch})
+    updated = {**current_user, **patch}
+    return _user_response(updated)
 
 
 @router.post("/child-login", response_model=ChildTokenResponse)
-async def child_standalone_login(data: ChildStandaloneLogin):
-    """Entrada para hijos: código de familia + nombre + PIN (si el padre configuró PIN)."""
+async def child_standalone_login(data: ChildStandaloneLogin, request: Request):
+    """Entrada para hijos: código de familia + nombre + PIN (requerido)."""
+    enforce_rate_limit(f"child-login:{client_ip(request)}", limit=40, window_sec=900)
+
     code = data.family_code.strip().upper()
     family = await db.families.find_one({"child_login_code": code})
     if not family:
@@ -279,6 +308,12 @@ async def child_standalone_login(data: ChildStandaloneLogin):
     if not child:
         raise HTTPException(status_code=400, detail="Nombre no encontrado en esta familia")
 
+    if not child.get("pin_hash"):
+        raise HTTPException(
+            status_code=400,
+            detail="Este perfil necesita un PIN. Pide a tu padre o madre que te asigne uno en Hijos.",
+        )
+
     lock_until = child.get("pin_locked_until")
     if lock_until and isinstance(lock_until, datetime) and lock_until > datetime.utcnow():
         remaining = int((lock_until - datetime.utcnow()).total_seconds() // 60) + 1
@@ -287,29 +322,32 @@ async def child_standalone_login(data: ChildStandaloneLogin):
             detail=f"PIN bloqueado temporalmente. Intenta de nuevo en {max(1, remaining)} min",
         )
 
-    if child.get("pin_hash"):
-        if not data.pin:
-            raise HTTPException(status_code=401, detail="PIN requerido")
-        if not verify_password(data.pin, child["pin_hash"]):
-            max_attempts = int(family.get("pin_failed_attempt_limit") or 5)
-            lock_minutes = int(family.get("pin_lockout_minutes") or 15)
-            failed_attempts = int(child.get("pin_failed_attempts") or 0) + 1
-            update_doc = {"pin_failed_attempts": failed_attempts}
-            if failed_attempts >= max_attempts:
-                update_doc["pin_failed_attempts"] = 0
-                update_doc["pin_locked_until"] = datetime.utcnow() + timedelta(minutes=lock_minutes)
-            await db.children.update_one({"id": child["id"]}, {"$set": update_doc})
-            if failed_attempts >= max_attempts:
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"PIN bloqueado por seguridad ({lock_minutes} min).",
-                )
-            raise HTTPException(status_code=401, detail="PIN incorrecto")
-        if child.get("pin_failed_attempts") or child.get("pin_locked_until"):
-            await db.children.update_one(
-                {"id": child["id"]},
-                {"$set": {"pin_failed_attempts": 0, "pin_locked_until": None}},
+    if not data.pin:
+        raise HTTPException(status_code=401, detail="PIN requerido")
+    if not verify_password(data.pin, child["pin_hash"]):
+        max_attempts = int(family.get("pin_failed_attempt_limit") or 5)
+        lock_minutes = int(family.get("pin_lockout_minutes") or 15)
+        failed_attempts = int(child.get("pin_failed_attempts") or 0) + 1
+        update_doc = {"pin_failed_attempts": failed_attempts}
+        if failed_attempts >= max_attempts:
+            update_doc["pin_failed_attempts"] = 0
+            update_doc["pin_locked_until"] = datetime.utcnow() + timedelta(minutes=lock_minutes)
+        await db.children.update_one({"id": child["id"]}, {"$set": update_doc})
+        if failed_attempts >= max_attempts:
+            raise HTTPException(
+                status_code=429,
+                detail=f"PIN bloqueado por seguridad ({lock_minutes} min).",
             )
+        raise HTTPException(status_code=401, detail="PIN incorrecto")
+
+    pin_updates: dict = {}
+    if child.get("pin_failed_attempts") or child.get("pin_locked_until"):
+        pin_updates["pin_failed_attempts"] = 0
+        pin_updates["pin_locked_until"] = None
+    if password_needs_rehash(child.get("pin_hash") or ""):
+        pin_updates["pin_hash"] = hash_password(data.pin)
+    if pin_updates:
+        await db.children.update_one({"id": child["id"]}, {"$set": pin_updates})
 
     token = create_child_access_token(
         child["id"],
@@ -323,6 +361,7 @@ async def child_standalone_login(data: ChildStandaloneLogin):
             name=child["name"],
             age=child["age"],
             alias=child.get("alias"),
+            gender=child.get("gender") if child.get("gender") in ("mujer", "hombre") else None,
             balance=float(child.get("balance", 0.0)),
             family_id=child["family_id"],
             created_at=child["created_at"],
@@ -352,6 +391,7 @@ async def auth_session(current_user: dict = Depends(get_current_user_or_child)):
                 "name": child["name"],
                 "age": child["age"],
                 "alias": child.get("alias"),
+                "gender": child.get("gender"),
                 "balance": float(child.get("balance", 0.0)),
                 "family_id": child["family_id"],
                 "created_at": child["created_at"].isoformat() if hasattr(child["created_at"], "isoformat") else child["created_at"],
@@ -367,17 +407,7 @@ async def auth_session(current_user: dict = Depends(get_current_user_or_child)):
 
     return {
         "type": "parent",
-        "user": {
-            "id": current_user["id"],
-            "email": current_user["email"],
-            "name": current_user["name"],
-            "role": current_user["role"],
-            "family_id": current_user.get("family_id"),
-            "family_role": current_user.get("family_role"),
-            "created_at": current_user["created_at"].isoformat()
-            if hasattr(current_user["created_at"], "isoformat")
-            else current_user["created_at"],
-        },
+        "user": _user_response(current_user).model_dump(mode="json"),
     }
 
 

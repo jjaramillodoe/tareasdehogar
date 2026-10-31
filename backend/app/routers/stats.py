@@ -100,7 +100,18 @@ async def get_child_stats(child_id: str, current_user: dict = Depends(get_curren
     if not child:
         raise HTTPException(status_code=404, detail="Hijo no encontrado")
 
-    pending = await db.chores.count_documents({"assigned_to": child_id, "status": "pendiente"})
+    horizon = datetime.utcnow().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
+    pending = await db.chores.count_documents(
+        {
+            "assigned_to": child_id,
+            "status": "pendiente",
+            "$or": [
+                {"scheduled_date": {"$exists": False}},
+                {"scheduled_date": None},
+                {"scheduled_date": {"$lte": horizon}},
+            ],
+        }
+    )
     completed = await db.chores.count_documents(
         {"completed_by": child_id, "status": {"$in": ["completada", "aprobada"]}}
     )
@@ -169,6 +180,14 @@ async def get_family_report(days: int = 7, current_user: dict = Depends(get_curr
         if day_str in daily_stats:
             daily_stats[day_str]["amount_paid"] += payment["amount"]
 
+    children_daily: dict[str, dict[str, int]] = {c["id"]: {d: 0 for d in daily_stats} for c in children}
+    for task in tasks_in_period:
+        if task.get("completed_at") and task.get("completed_by"):
+            day_str = task["completed_at"].strftime("%Y-%m-%d")
+            cid = task["completed_by"]
+            if cid in children_daily and day_str in children_daily[cid]:
+                children_daily[cid][day_str] += 1
+
     children_stats = []
     for child in children:
         child_tasks = [t for t in tasks_in_period if t.get("completed_by") == child["id"]]
@@ -192,6 +211,7 @@ async def get_family_report(days: int = 7, current_user: dict = Depends(get_curr
         "total_tasks_completed": len(tasks_in_period),
         "total_amount_paid": sum(p["amount"] for p in payments_in_period),
         "daily_stats": daily_stats,
+        "children_daily": children_daily,
         "children_stats": children_stats,
         "family_savings_challenge": family_challenge,
     }

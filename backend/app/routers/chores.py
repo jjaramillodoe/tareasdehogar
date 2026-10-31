@@ -7,9 +7,17 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.config import db
 from app.deps import get_current_user, get_current_user_or_child
-from app.models import ChoreApprove, ChoreComplete, ChoreCreate, ChoreResponse, ChoreUpdate
+from app.models import (
+    ChoreApprove,
+    ChoreBulkApprove,
+    ChoreComplete,
+    ChoreCreate,
+    ChoreResponse,
+    ChoreUpdate,
+)
 from app.services.achievements import award_achievement, update_child_streak, update_goal_progress
 from app.services.chore_savings import apply_chore_savings_split, preview_chore_savings_split
+from app.services.media_store import persist_photo_reference
 from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/chores", tags=["chores"])
@@ -27,13 +35,37 @@ def _chore_to_response(c: dict) -> ChoreResponse:
     return ChoreResponse(**data)
 
 
+def _actionable_horizon(now: Optional[datetime] = None) -> datetime:
+    """Pending chores after this date belong on Calendario, not the daily list."""
+    base = now or datetime.utcnow()
+    return (base + timedelta(days=2)).replace(hour=23, minute=59, second=59, microsecond=0)
+
+
+def _list_chore_query(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Operational lists: due soon + in review + recent approved. Full schedule is Calendario."""
+    base = now or datetime.utcnow()
+    horizon = _actionable_horizon(base)
+    recent = (base - timedelta(days=21)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "$or": [
+            {"status": "completada"},
+            {"status": "rechazada"},
+            {"status": "pendiente", "scheduled_date": {"$exists": False}},
+            {"status": "pendiente", "scheduled_date": None},
+            {"status": "pendiente", "scheduled_date": {"$lte": horizon}},
+            {"status": "aprobada", "completed_at": {"$gte": recent}},
+            {"status": "aprobada", "created_at": {"$gte": recent}},
+        ]
+    }
+
+
 def _parse_scheduled_date(raw: Optional[str]) -> Optional[datetime]:
     if not raw:
         return None
     try:
         if len(raw) == 10:
             d = datetime.fromisoformat(raw)
-            return datetime.combine(d.date(), time.min)
+            return datetime.combine(d.date(), time(12, 0))
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(status_code=400, detail="scheduled_date inválida (usa YYYY-MM-DD)")
@@ -214,7 +246,12 @@ async def get_chores_calendar(
     last_day = monthrange(year, month)[1]
     end = datetime(year, month, last_day, 23, 59, 59)
 
-    chores = await db.chores.find({"family_id": current_user["family_id"]}).to_list(2000)
+    chores = await db.chores.find(
+        {
+            "family_id": current_user["family_id"],
+            "scheduled_date": {"$gte": start, "$lte": end},
+        }
+    ).to_list(8000)
     children_docs = await db.children.find({"family_id": current_user["family_id"]}).to_list(100)
     child_map = {
         c["id"]: {"id": c["id"], "name": c["name"], "gender": c.get("gender")}
@@ -250,11 +287,12 @@ async def get_chores(status: Optional[str] = None, current_user: dict = Depends(
     if not current_user.get("family_id"):
         raise HTTPException(status_code=400, detail="No tienes una familia")
 
-    query = {"family_id": current_user["family_id"]}
+    query: Dict[str, Any] = {"family_id": current_user["family_id"]}
     if status:
         query["status"] = status
+    query.update(_list_chore_query())
 
-    chores = await db.chores.find(query).sort("created_at", -1).to_list(1000)
+    chores = await db.chores.find(query).sort("created_at", -1).to_list(5000)
     return [_chore_to_response(c) for c in chores]
 
 
@@ -269,11 +307,12 @@ async def get_chores_for_child(
     if not child:
         raise HTTPException(status_code=404, detail="Hijo no encontrado")
 
-    query = {"family_id": current_user["family_id"], "assigned_to": child_id}
+    query: Dict[str, Any] = {"family_id": current_user["family_id"], "assigned_to": child_id}
     if status:
         query["status"] = status
+    query.update(_list_chore_query())
 
-    chores = await db.chores.find(query).sort("created_at", -1).to_list(1000)
+    chores = await db.chores.find(query).sort("created_at", -1).to_list(5000)
     return [_chore_to_response(c) for c in chores]
 
 
@@ -385,9 +424,10 @@ async def complete_chore(
     if chore["status"] != "pendiente":
         raise HTTPException(status_code=400, detail="Esta tarea ya no está pendiente")
 
-    photo = complete_data.photo_url
-    if photo and len(photo) > 600_000:
-        raise HTTPException(status_code=400, detail="La imagen es demasiado grande")
+    photo = persist_photo_reference(
+        complete_data.photo_url,
+        family_id=current_user["family_id"],
+    )
 
     await db.chores.update_one(
         {"id": chore_id},
@@ -402,16 +442,25 @@ async def complete_chore(
         },
     )
 
+    child = await db.children.find_one({"id": child_id})
+    child_name = (child or {}).get("name") or "Un hijo"
+    await create_notification(
+        current_user["family_id"],
+        "task_completed",
+        "Tarea lista para aprobar",
+        f"{child_name} completó «{chore['title']}». Revísala para pagar.",
+        child_id,
+    )
+
     updated = await db.chores.find_one({"id": chore_id})
     return _chore_to_response(updated)
 
 
-@router.post("/{chore_id}/approve", response_model=ChoreResponse)
-async def approve_chore(
+async def _approve_chore_impl(
     chore_id: str,
-    data: ChoreApprove = Body(default_factory=ChoreApprove),
-    current_user: dict = Depends(get_current_user),
-):
+    data: ChoreApprove,
+    current_user: dict,
+) -> ChoreResponse:
     """Aprobar una tarea completada — opcional calificación, feedback y bono por calidad."""
     chore = await db.chores.find_one({"id": chore_id, "family_id": current_user.get("family_id")})
     if not chore:
@@ -419,6 +468,9 @@ async def approve_chore(
 
     if chore["status"] != "completada":
         raise HTTPException(status_code=400, detail="Solo se pueden aprobar tareas completadas")
+
+    if not chore.get("completed_by"):
+        raise HTTPException(status_code=400, detail="La tarea no tiene hijo asignado al completarla")
 
     qbonus = float(data.quality_bonus or 0)
     total_pay = float(chore["amount"]) + qbonus
@@ -616,6 +668,65 @@ async def approve_chore(
     return _chore_to_response(updated)
 
 
+@router.post("/approve/bulk")
+async def bulk_approve_chores(
+    data: ChoreBulkApprove,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Aprueba en lote tareas completadas.
+    Usa la regla de ahorro por defecto de cada hijo (sin bono de calidad).
+    """
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="No tienes una familia")
+
+    query: Dict[str, Any] = {
+        "family_id": current_user["family_id"],
+        "status": "completada",
+    }
+    ids = [x for x in (data.chore_ids or []) if isinstance(x, str) and x.strip()]
+    if ids:
+        query["id"] = {"$in": ids}
+
+    candidates = await db.chores.find(query).to_list(200)
+    if data.max_amount is not None:
+        max_amt = float(data.max_amount)
+        candidates = [c for c in candidates if float(c.get("amount") or 0) <= max_amt]
+
+    approve_opts = ChoreApprove(rating=data.rating or 5)
+    approved_count = 0
+    skipped_count = 0
+    total_amount = 0.0
+    approved_ids: List[str] = []
+
+    for chore in candidates:
+        try:
+            result = await _approve_chore_impl(chore["id"], approve_opts, current_user)
+            approved_count += 1
+            total_amount += float(result.amount or chore.get("amount") or 0)
+            approved_ids.append(chore["id"])
+        except HTTPException:
+            skipped_count += 1
+        except Exception:
+            skipped_count += 1
+
+    return {
+        "approved_count": approved_count,
+        "skipped_count": skipped_count,
+        "total_amount": round(total_amount, 2),
+        "approved_ids": approved_ids,
+    }
+
+
+@router.post("/{chore_id}/approve", response_model=ChoreResponse)
+async def approve_chore(
+    chore_id: str,
+    data: ChoreApprove = Body(default_factory=ChoreApprove),
+    current_user: dict = Depends(get_current_user),
+):
+    return await _approve_chore_impl(chore_id, data, current_user)
+
+
 @router.post("/{chore_id}/reject", response_model=ChoreResponse)
 async def reject_chore(chore_id: str, current_user: dict = Depends(get_current_user)):
     """Rechazar una tarea completada"""
@@ -629,6 +740,15 @@ async def reject_chore(chore_id: str, current_user: dict = Depends(get_current_u
     await db.chores.update_one(
         {"id": chore_id},
         {"$set": {"status": "rechazada", "photo_url": None}},
+    )
+
+    child_id = chore.get("completed_by")
+    await create_notification(
+        current_user["family_id"],
+        "task_rejected",
+        "Tarea por corregir",
+        f"«{chore['title']}» fue rechazada. Puedes corregirla y marcarla de nuevo.",
+        child_id,
     )
 
     updated = await db.chores.find_one({"id": chore_id})

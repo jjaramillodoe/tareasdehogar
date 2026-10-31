@@ -1,7 +1,8 @@
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import db
 from app.deps import get_current_user_or_child
@@ -12,6 +13,12 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 class NotificationsDeleteManyBody(BaseModel):
     ids: List[str]
+
+
+class PushTokenBody(BaseModel):
+    token: str = Field(..., min_length=8, max_length=512)
+    platform: Optional[str] = Field(None, max_length=32)
+    device_name: Optional[str] = Field(None, max_length=120)
 
 
 def _base_scope_query(current_user: dict) -> dict:
@@ -93,3 +100,43 @@ async def delete_selected_notifications(
     query["id"] = {"$in": ids}
     result = await db.notifications.delete_many(query)
     return {"deleted_count": int(result.deleted_count)}
+
+
+@router.post("/push-token")
+async def register_push_token(
+    body: PushTokenBody,
+    current_user: dict = Depends(get_current_user_or_child),
+):
+    """
+    Guarda un token Expo/APNs/FCM para el usuario o hijo autenticado.
+    Foundation: el envío push se implementará después.
+    """
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token inválido")
+
+    entry = {
+        "token": token,
+        "platform": (body.platform or "").strip() or None,
+        "device_name": (body.device_name or "").strip() or None,
+        "updated_at": datetime.utcnow(),
+    }
+
+    if current_user.get("is_child_session"):
+        child_id = current_user.get("child_id")
+        child = await db.children.find_one({"id": child_id})
+        if not child:
+            raise HTTPException(status_code=404, detail="Hijo no encontrado")
+        tokens = [t for t in (child.get("push_tokens") or []) if t.get("token") != token]
+        tokens.append(entry)
+        await db.children.update_one({"id": child_id}, {"$set": {"push_tokens": tokens[-10:]}})
+        return {"ok": True, "scope": "child"}
+
+    user_id = current_user.get("id")
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    tokens = [t for t in (user.get("push_tokens") or []) if t.get("token") != token]
+    tokens.append(entry)
+    await db.users.update_one({"id": user_id}, {"$set": {"push_tokens": tokens[-10:]}})
+    return {"ok": True, "scope": "user"}

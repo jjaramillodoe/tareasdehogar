@@ -37,13 +37,17 @@ async def create_child(child_data: ChildCreate, current_user: dict = Depends(get
     if child_data.age >= 19:
         raise HTTPException(status_code=400, detail="Los hijos deben ser menores de 19 años")
 
+    pin = (child_data.pin or "").strip()
+    if len(pin) < 4:
+        raise HTTPException(status_code=400, detail="El PIN es obligatorio (mínimo 4 caracteres)")
+
     child_id = str(uuid.uuid4())
     child = {
         "id": child_id,
         "name": child_data.name,
         "age": child_data.age,
         "alias": child_data.alias or child_data.name,
-        "pin_hash": hash_password(child_data.pin) if child_data.pin else None,
+        "pin_hash": hash_password(pin),
         "balance": 0.0,
         "savings_on_approve_percent": 10.0,
         "family_id": current_user["family_id"],
@@ -124,7 +128,7 @@ async def update_child(child_id: str, child_data: ChildUpdate, current_user: dic
             g = await db.savings_goals.find_one(
                 {"id": gid, "child_id": child_id, "family_id": current_user["family_id"]}
             )
-            if not g:
+            if not g or (g.get("status") or "active") != "active":
                 raise HTTPException(status_code=400, detail="Meta de ahorro no encontrada para este hijo")
             update_data["savings_on_approve_goal_id"] = gid
         else:

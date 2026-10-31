@@ -6,10 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import db
 from app.deps import get_current_user, get_current_user_or_child
-from app.models import SavingsGoalCreate, SavingsGoalResponse, SavingsGoalUpdate, SavingsTransferBody
+from app.models import (
+    SavingsGoalCreate,
+    SavingsGoalPropose,
+    SavingsGoalResponse,
+    SavingsGoalUpdate,
+    SavingsTransferBody,
+)
 from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/savings-goals", tags=["savings-goals"])
+
+
+def _status(doc: dict) -> str:
+    return str(doc.get("status") or "active")
 
 
 def _to_response(doc: dict) -> SavingsGoalResponse:
@@ -23,6 +33,8 @@ def _to_response(doc: dict) -> SavingsGoalResponse:
         family_id=doc["family_id"],
         created_at=doc["created_at"],
         is_completed=bool(doc.get("is_completed", False)),
+        status=_status(doc),
+        proposed_by_child=bool(doc.get("proposed_by_child", False)),
         milestones_reached=[int(x) for x in (doc.get("milestones_reached") or [])],
         last_milestone_reached=(
             int(doc["last_milestone_reached"])
@@ -73,6 +85,8 @@ async def create_savings_goal(
         "family_id": current_user["family_id"],
         "created_at": datetime.utcnow(),
         "is_completed": False,
+        "status": "active",
+        "proposed_by_child": False,
         "milestones_reached": [],
         "last_milestone_reached": None,
     }
@@ -89,6 +103,60 @@ async def create_savings_goal(
     return _to_response(doc)
 
 
+@router.post("/propose", response_model=SavingsGoalResponse)
+async def propose_savings_goal(
+    data: SavingsGoalPropose,
+    current_user: dict = Depends(get_current_user_or_child),
+):
+    """Un hijo propone una meta; queda pendiente hasta que un padre la apruebe."""
+    if not current_user.get("is_child_session"):
+        raise HTTPException(status_code=403, detail="Solo los hijos pueden proponer metas")
+    fid = current_user.get("family_id")
+    child_id = current_user.get("child_id")
+    if not fid or not child_id:
+        raise HTTPException(status_code=400, detail="Sesión de hijo inválida")
+
+    child = await db.children.find_one({"id": child_id, "family_id": fid})
+    if not child:
+        raise HTTPException(status_code=404, detail="Hijo no encontrado")
+
+    pending_count = await db.savings_goals.count_documents(
+        {"child_id": child_id, "family_id": fid, "status": "pending"}
+    )
+    if pending_count >= 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Ya tienes varias propuestas pendientes. Espera a que las revisen.",
+        )
+
+    goal_id = str(uuid.uuid4())
+    doc = {
+        "id": goal_id,
+        "title": data.title.strip(),
+        "note": data.note.strip() if data.note else None,
+        "target_amount": float(data.target_amount),
+        "saved_amount": 0.0,
+        "child_id": child_id,
+        "family_id": fid,
+        "created_at": datetime.utcnow(),
+        "is_completed": False,
+        "status": "pending",
+        "proposed_by_child": True,
+        "milestones_reached": [],
+        "last_milestone_reached": None,
+    }
+    await db.savings_goals.insert_one(doc)
+
+    await create_notification(
+        fid,
+        "savings_goal_proposed",
+        "Nueva propuesta de meta",
+        f"{child['name']} propone ahorrar para «{doc['title']}» ({doc['target_amount']:.2f})",
+        child_id,
+    )
+    return _to_response(doc)
+
+
 @router.get("", response_model=List[SavingsGoalResponse])
 async def list_savings_goals(
     child_id: Optional[str] = None,
@@ -101,10 +169,15 @@ async def list_savings_goals(
     query: dict = {"family_id": fid}
     if current_user.get("is_child_session"):
         query["child_id"] = current_user["child_id"]
+        # Kids don't see rejected proposals
+        query["status"] = {"$ne": "rejected"}
     elif child_id:
         query["child_id"] = child_id
 
     rows = await db.savings_goals.find(query).sort("created_at", -1).to_list(100)
+    # Legacy docs without status still appear as active via _to_response
+    if current_user.get("is_child_session"):
+        rows = [g for g in rows if _status(g) != "rejected"]
     return [_to_response(g) for g in rows]
 
 
@@ -116,6 +189,52 @@ async def get_savings_goal(goal_id: str, current_user: dict = Depends(get_curren
     if current_user.get("is_child_session") and goal["child_id"] != current_user["child_id"]:
         raise HTTPException(status_code=403, detail="No autorizado")
     return _to_response(goal)
+
+
+@router.post("/{goal_id}/approve-proposal", response_model=SavingsGoalResponse)
+async def approve_goal_proposal(goal_id: str, current_user: dict = Depends(get_current_user)):
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="Sin familia")
+    goal = await db.savings_goals.find_one({"id": goal_id, "family_id": current_user["family_id"]})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    if _status(goal) != "pending":
+        raise HTTPException(status_code=400, detail="Esta meta no está pendiente de aprobación")
+
+    await db.savings_goals.update_one({"id": goal_id}, {"$set": {"status": "active"}})
+    updated = await db.savings_goals.find_one({"id": goal_id})
+
+    await create_notification(
+        current_user["family_id"],
+        "savings_goal_created",
+        "¡Meta aprobada!",
+        f"Tu propuesta «{goal['title']}» fue aprobada. Ya puedes aportar de tu saldo.",
+        goal["child_id"],
+    )
+    return _to_response(updated)
+
+
+@router.post("/{goal_id}/reject-proposal", response_model=SavingsGoalResponse)
+async def reject_goal_proposal(goal_id: str, current_user: dict = Depends(get_current_user)):
+    if not current_user.get("family_id"):
+        raise HTTPException(status_code=400, detail="Sin familia")
+    goal = await db.savings_goals.find_one({"id": goal_id, "family_id": current_user["family_id"]})
+    if not goal:
+        raise HTTPException(status_code=404, detail="Meta no encontrada")
+    if _status(goal) != "pending":
+        raise HTTPException(status_code=400, detail="Esta meta no está pendiente de aprobación")
+
+    await db.savings_goals.update_one({"id": goal_id}, {"$set": {"status": "rejected"}})
+    updated = await db.savings_goals.find_one({"id": goal_id})
+
+    await create_notification(
+        current_user["family_id"],
+        "savings_goal_rejected",
+        "Propuesta de meta",
+        f"Tu propuesta «{goal['title']}» no fue aprobada. Habla con tu familia para otra idea.",
+        goal["child_id"],
+    )
+    return _to_response(updated)
 
 
 @router.put("/{goal_id}", response_model=SavingsGoalResponse)
@@ -189,6 +308,9 @@ async def allocate_to_savings_goal(
     if current_user.get("is_child_session") and goal["child_id"] != current_user["child_id"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
+    if _status(goal) != "active":
+        raise HTTPException(status_code=400, detail="La meta aún no está aprobada")
+
     child = await db.children.find_one({"id": goal["child_id"], "family_id": fid})
     if not child:
         raise HTTPException(status_code=404, detail="Hijo no encontrado")
@@ -260,6 +382,9 @@ async def release_from_savings_goal(
 
     if current_user.get("is_child_session") and goal["child_id"] != current_user["child_id"]:
         raise HTTPException(status_code=403, detail="No autorizado")
+
+    if _status(goal) != "active":
+        raise HTTPException(status_code=400, detail="La meta aún no está aprobada")
 
     amt = float(body.amount)
     saved = float(goal.get("saved_amount", 0))

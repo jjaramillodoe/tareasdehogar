@@ -1,9 +1,11 @@
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 
-from app.config import client
+from app.config import CORS_ORIGINS, ROOT_DIR, client
 from app.routers import (
     achievements,
     auth,
@@ -12,6 +14,7 @@ from app.routers import (
     families,
     goals,
     health,
+    media,
     notifications,
     payments,
     savings_goals,
@@ -39,13 +42,20 @@ api_router.include_router(goals.router)
 api_router.include_router(savings_goals.router)
 api_router.include_router(notifications.router)
 api_router.include_router(achievements.router)
+api_router.include_router(media.router)
 
 app.include_router(api_router)
 
+_uploads_dir = Path(ROOT_DIR) / "uploads"
+_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+
+# Starlette disallows allow_origins=["*"] with allow_credentials=True.
+_cors_wildcard = CORS_ORIGINS == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
+    allow_credentials=not _cors_wildcard,
+    allow_origins=CORS_ORIGINS if not _cors_wildcard else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

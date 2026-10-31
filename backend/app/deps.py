@@ -2,6 +2,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+import bcrypt
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -13,12 +14,33 @@ security = HTTPBearer()
 CHILD_TOKEN_EXPIRE_DAYS = 90
 
 
+def _is_bcrypt_hash(hashed: str) -> bool:
+    return bool(hashed) and (
+        hashed.startswith("$2a$") or hashed.startswith("$2b$") or hashed.startswith("$2y$")
+    )
+
+
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash with bcrypt (new hashes)."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return hash_password(password) == hashed
+    """Verify bcrypt or legacy SHA-256 hashes."""
+    if not hashed or password is None:
+        return False
+    if _is_bcrypt_hash(hashed):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+        except (ValueError, TypeError):
+            return False
+    # Legacy SHA-256 (pre-migration)
+    return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
+
+
+def password_needs_rehash(hashed: str) -> bool:
+    """True when stored hash should be upgraded to bcrypt on next successful login."""
+    return not _is_bcrypt_hash(hashed or "")
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

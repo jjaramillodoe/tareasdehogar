@@ -70,16 +70,27 @@ def _compute_split(
     )
 
 
+def _goal_usable(g: Optional[dict]) -> bool:
+    if not g or g.get("is_completed", False):
+        return False
+    return (g.get("status") or "active") == "active"
+
+
 async def _resolve_target_goal(child_id: str, family_id: str, preferred_id: Optional[str]):
     if preferred_id:
         g = await db.savings_goals.find_one(
             {"id": preferred_id, "child_id": child_id, "family_id": family_id}
         )
-        if g and not g.get("is_completed", False):
+        if _goal_usable(g):
             return g
 
     return await db.savings_goals.find_one(
-        {"child_id": child_id, "family_id": family_id, "is_completed": False},
+        {
+            "child_id": child_id,
+            "family_id": family_id,
+            "is_completed": False,
+            "$or": [{"status": "active"}, {"status": {"$exists": False}}],
+        },
         sort=[("created_at", 1)],
     )
 

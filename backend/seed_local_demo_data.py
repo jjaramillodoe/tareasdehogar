@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List
 
 from app.config import db
-from app.services.achievements import ACHIEVEMENTS_DEFINITIONS
+from app.services.achievements import check_and_award_achievements
 
 
 ACTIVITY_COLLECTIONS = [
@@ -84,6 +84,61 @@ def _child_names(children: List[Dict[str, Any]]) -> Dict[str, str]:
     return {c["id"]: c.get("name", "Hijo") for c in children}
 
 
+CHORE_CATALOG = (
+    ("Tender la cama", "Tender y acomodar la cama al despertar"),
+    ("Ordenar el cuarto", "Recoger ropa y juguetes del piso"),
+    ("Poner la mesa", "Platos, vasos y cubiertos para la comida"),
+    ("Lavar los platos", "Lavar y dejar secar lo de la cena"),
+    ("Sacar la basura", "Bolsas al contenedor y bolsas nuevas"),
+    ("Ayudar con la compra", "Guardar lo que se compró en su lugar"),
+    ("Regar las plantas", "Agua a las macetas del patio y la sala"),
+    ("Barrer el patio", "Barrer hojas y polvo del patio"),
+    ("Organizar la mochila", "Cuadernos, estuche y lonchera listos"),
+    ("Doblar la ropa", "Doblar y guardar la ropa limpia"),
+    ("Ordenar juguetes", "Todos los juguetes a su caja o estante"),
+    ("Limpiar el baño chico", "Lavabo y espejo con el paño"),
+    ("Dar de comer a la mascota", "Agua y comida a la hora acordada"),
+    ("Preparar el desayuno", "Ayudar a servir cereal o fruta"),
+    ("Recoger el comedor", "Limpiar migas y empujar las sillas"),
+)
+
+
+def _catalog_item(day: datetime, child_idx: int, t: int) -> tuple[str, str]:
+    return CHORE_CATALOG[(day.toordinal() + child_idx + t) % len(CHORE_CATALOG)]
+
+
+def _tasks_for_day(day: datetime, child_idx: int, *, dense: bool) -> int:
+    weekday = day.weekday()
+    seed_n = (day.toordinal() * 17 + child_idx * 31) % 100
+    if dense:
+        if weekday >= 5:
+            return 2
+        return 3
+    if weekday >= 5:
+        return 1 if seed_n < (55 - child_idx * 12) else 0
+    if seed_n < (12 + child_idx * 8):
+        return 0
+    if seed_n < 55:
+        return 1
+    if seed_n < 85:
+        return 2
+    return 3
+
+
+def _demo_seed_window(now: datetime) -> tuple[datetime, datetime, datetime, datetime]:
+    """History for reports + calendar feed from 13 Aug 2026 onward."""
+    hist_end = now.replace(microsecond=0)
+    hist_start = datetime(now.year, 8, 12)
+    if hist_end < hist_start:
+        hist_start = datetime(now.year - 1, 8, 12)
+    if (hist_end.date() - hist_start.date()).days < 14:
+        hist_start = (hist_end - timedelta(days=45)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    cal_start = datetime(2026, 8, 13)
+    cal_end = datetime(2026, 10, 31, 23, 59, 59)
+    return hist_start, hist_end, cal_start, cal_end
+
+
 async def clean_family_activity_data(family_ids: List[str]) -> None:
     if not family_ids:
         return
@@ -139,7 +194,118 @@ async def seed_for_family(
             }
         )
 
-        # Chores in mixed states.
+        # Dense history for charts/reports + dated calendar feed from 13 Aug 2026.
+        hist_start, hist_end, cal_start, cal_end = _demo_seed_window(now)
+        timeline_chores: List[Dict[str, Any]] = []
+        timeline_payments: List[Dict[str, Any]] = []
+        timeline_earned = 0.0
+        last_task_date = None
+        best_streak = 0
+        running_streak = 0
+        day = hist_start.replace(hour=12, minute=0, second=0, microsecond=0)
+        end_day = hist_end.replace(hour=12, minute=0, second=0, microsecond=0)
+        while day <= end_day:
+            tasks_today = _tasks_for_day(day, idx, dense=False)
+
+            if tasks_today > 0:
+                running_streak += 1
+                best_streak = max(best_streak, running_streak)
+                last_task_date = day
+            else:
+                running_streak = 0
+
+            for t in range(tasks_today):
+                title_base, desc = _catalog_item(day, idx, t)
+                amount = round(
+                    preset["chore_small"] + ((day.toordinal() + idx + t) % 3) * 0.5,
+                    2,
+                )
+                chore_id = _u()
+                completed_at = day.replace(hour=16 + t, minute=(idx * 7 + t * 11) % 50)
+                if completed_at > now:
+                    completed_at = now - timedelta(minutes=30 + t)
+                scheduled = day.replace(hour=12, minute=0, second=0, microsecond=0)
+                timeline_chores.append(
+                    {
+                        "id": chore_id,
+                        "title": title_base,
+                        "description": desc,
+                        "amount": amount,
+                        "frequency": "unica",
+                        "assigned_to": [child_id],
+                        "status": "aprobada",
+                        "completed_by": child_id,
+                        "completed_at": completed_at,
+                        "comment": "Listo",
+                        "family_id": family_id,
+                        "created_at": completed_at - timedelta(hours=2),
+                        "scheduled_date": scheduled,
+                        "photo_url": None,
+                        "rating": 4 + ((day.toordinal() + t) % 2),
+                        "parent_feedback": "Buen trabajo",
+                        "quality_bonus": 0.0,
+                        "is_demo": True,
+                    }
+                )
+                timeline_payments.append(
+                    {
+                        "id": _u(),
+                        "child_id": child_id,
+                        "chore_id": chore_id,
+                        "chore_title": title_base,
+                        "amount": amount,
+                        "status": "aprobado",
+                        "family_id": family_id,
+                        "created_at": completed_at,
+                        "payment_type": "chore",
+                        "purpose_note": None,
+                        "quality_bonus": 0.0,
+                        "withdrawal_id": None,
+                        "savings_allocated": None,
+                        "savings_goal_id": None,
+                        "is_demo": True,
+                    }
+                )
+                timeline_earned += amount
+            day += timedelta(days=1)
+
+        cal_loop = max(cal_start.date(), (hist_end + timedelta(days=1)).date())
+        cal_day = datetime(cal_loop.year, cal_loop.month, cal_loop.day, 12, 0, 0)
+        cal_last = cal_end.replace(hour=12, minute=0, second=0, microsecond=0)
+        while cal_day <= cal_last:
+            tasks_today = _tasks_for_day(cal_day, idx, dense=True)
+            for t in range(tasks_today):
+                title_base, desc = _catalog_item(cal_day, idx, t)
+                amount = round(
+                    preset["chore_small"] + ((cal_day.toordinal() + idx + t) % 3) * 0.5,
+                    2,
+                )
+                scheduled = cal_day.replace(hour=12, minute=0, second=0, microsecond=0)
+                timeline_chores.append(
+                    {
+                        "id": _u(),
+                        "title": title_base,
+                        "description": desc,
+                        "amount": amount,
+                        "frequency": "unica",
+                        "assigned_to": [child_id],
+                        "status": "pendiente",
+                        "completed_by": None,
+                        "completed_at": None,
+                        "comment": None,
+                        "family_id": family_id,
+                        "created_at": now,
+                        "scheduled_date": scheduled,
+                        "photo_url": None,
+                        "rating": None,
+                        "parent_feedback": None,
+                        "quality_bonus": 0.0,
+                        "is_demo": True,
+                    }
+                )
+            cal_day += timedelta(days=1)
+
+        # Spotlight chores in mixed states (home / review flows).
         chore_ids = [_u(), _u(), _u()]
         chores = [
             {
@@ -160,6 +326,7 @@ async def seed_for_family(
                 "rating": 5,
                 "parent_feedback": "Excelente trabajo",
                 "quality_bonus": 5.0,
+                "is_demo": True,
             },
             {
                 "id": chore_ids[1],
@@ -179,6 +346,7 @@ async def seed_for_family(
                 "rating": None,
                 "parent_feedback": None,
                 "quality_bonus": 0.0,
+                "is_demo": True,
             },
             {
                 "id": chore_ids[2],
@@ -198,9 +366,10 @@ async def seed_for_family(
                 "rating": None,
                 "parent_feedback": None,
                 "quality_bonus": 0.0,
+                "is_demo": True,
             },
         ]
-        await db.chores.insert_many(chores)
+        await db.chores.insert_many(timeline_chores + chores)
 
         # Payments
         chore_payment_amt = preset["approved_pay"]
@@ -255,7 +424,7 @@ async def seed_for_family(
             "savings_allocated": None,
             "savings_goal_id": None,
         }
-        await db.payments.insert_many([p1, p2, p3])
+        await db.payments.insert_many(timeline_payments + [p1, p2, p3])
 
         # Withdrawals + withdrawal payment for approved one.
         wd_pending_id = _u()
@@ -303,27 +472,12 @@ async def seed_for_family(
                 "payment_type": "withdrawal",
                 "purpose_note": "Pago en efectivo",
                 "quality_bonus": 0.0,
+                "is_demo": True,
                 "withdrawal_id": wd_approved_id,
                 "savings_allocated": None,
                 "savings_goal_id": None,
             }
         )
-
-        # Achievements (pick 2 stable definitions).
-        for a_type in ("first_task", "tasks_5"):
-            definition = ACHIEVEMENTS_DEFINITIONS[a_type]
-            await db.achievements.insert_one(
-                {
-                    "id": _u(),
-                    "type": a_type,
-                    "title": definition["title"],
-                    "description": definition["description"],
-                    "icon": definition["icon"],
-                    "child_id": child_id,
-                    "family_id": family_id,
-                    "earned_at": base - timedelta(days=3),
-                }
-            )
 
         # Notifications
         notifs = [
@@ -371,7 +525,7 @@ async def seed_for_family(
         all_notifications.extend(notifs)
 
         # Update child balance and streak fields to match demo.
-        credit = p1["amount"] + p2["amount"] + p3["amount"]
+        credit = timeline_earned + p1["amount"] + p2["amount"] + p3["amount"]
         debit = preset["withdraw_approved"]  # approved withdrawal paid
         new_balance = round(max(0.0, credit - debit), 2)
         await db.children.update_one(
@@ -379,11 +533,11 @@ async def seed_for_family(
             {
                 "$set": {
                     "balance": new_balance,
-                    "current_streak": 4 + idx,
-                    "best_streak": max(6, 4 + idx),
+                    "current_streak": max(running_streak, 1),
+                    "best_streak": max(best_streak, running_streak, 6),
                     "savings_current_streak": 4 + idx,
                     "savings_best_streak": max(6, 4 + idx),
-                    "last_task_date": base - timedelta(days=1),
+                    "last_task_date": last_task_date or (base - timedelta(days=1)),
                     "last_savings_date": base - timedelta(days=2),
                 }
             },
@@ -391,6 +545,10 @@ async def seed_for_family(
 
     if all_notifications:
         await db.notifications.insert_many(all_notifications)
+
+    # Award achievements from seeded activity (same engine as live approvals).
+    for ch in children:
+        await check_and_award_achievements(ch["id"], family_id)
 
     # Upsert family challenge row for current month.
     month_key = now.strftime("%Y-%m")
@@ -409,7 +567,11 @@ async def seed_for_family(
         upsert=True,
     )
 
-    print(f" - seeded chores/payments/withdrawals/goals/achievements/notifications for {len(children)} child(ren)")
+    ws, we = _demo_seed_window(now)
+    print(
+        f" - seeded chores/payments/withdrawals/goals/achievements/notifications "
+        f"for {len(children)} child(ren) [{ws.date()} → {we.date()}]"
+    )
 
 
 async def run(clean: bool, profile: str) -> None:
